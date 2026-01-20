@@ -1,6 +1,11 @@
+import os
 from typing import Optional, List
 from sqlmodel import Field, SQLModel, create_engine, Relationship
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class SearchItemLink(SQLModel, table=True):
     search_id: int = Field(foreign_key="searchsession.id", primary_key=True)
@@ -20,7 +25,7 @@ class SearchSession(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
     
     # Настройки
-    limit_count: int = Field(default=20) 
+    limit_count: int = Field(default=int(os.getenv("DEFAULT_LIMIT_COUNT", "20"))) 
     open_in_browser: bool = Field(default=True)
     use_cache: bool = Field(default=False)
     
@@ -44,7 +49,7 @@ class Item(SQLModel, table=True):
     
     searches: List[SearchSession] = Relationship(back_populates="items", link_model=SearchItemLink)
 
-sqlite_file_name = "database.db"
+sqlite_file_name = os.getenv("DATABASE_FILE_NAME", "database.db")
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 

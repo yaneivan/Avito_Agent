@@ -5,6 +5,10 @@ import os
 from typing import Type, Any, Dict
 from pydantic import BaseModel
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Абстрактный класс (Интерфейс)
 class LLMProvider(abc.ABC):
@@ -17,9 +21,9 @@ class LLMProvider(abc.ABC):
 
 # 1. Провайдер для OpenAI (Structured Outputs)
 class OpenAIStrictProvider(LLMProvider):
-    def __init__(self, api_key: str, base_url: str = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, base_url: str = None, model: str = None):
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self.model = model
+        self.model = model or os.getenv("LOCAL_LLM_MODEL", "Qwen3-Vl-4B-Instruct")
 
     async def extract_data(self, text_content: str, image_path: str | None, schema: Type[BaseModel]) -> BaseModel:
         messages = [
@@ -88,10 +92,10 @@ def get_llm_provider() -> LLMProvider:
     # Здесь логика выбора. Можно брать из конфига.
     # Пример для локальной Llama/Qwen:
     return GenericProvider(
-        api_key="not-needed",
-        base_url="http://localhost:8080/v1", 
-        model="qwen3-vl"
+        api_key=os.getenv("LOCAL_LLM_API_KEY", "not-needed"),
+        base_url=os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1"),
+        model=os.getenv("LOCAL_LLM_MODEL", "Qwen3-Vl-4B-Instruct")
     )
-    
+
     # Пример для OpenAI:
     # return OpenAIStrictProvider(api_key=os.getenv("OPENAI_API_KEY"))

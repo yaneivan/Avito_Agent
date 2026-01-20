@@ -2,11 +2,15 @@ import json
 import os
 import base64
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Настройки для локального Docker (llama.cpp server)
-LOCAL_LLM_URL = "http://localhost:8080/v1"
-API_KEY = "not-needed"
-MODEL_NAME = "qwen2-vl" 
+LOCAL_LLM_URL = os.getenv("LOCAL_LLM_URL", "http://localhost:8080/v1")
+API_KEY = os.getenv("LOCAL_LLM_API_KEY", "not-needed")
+MODEL_NAME = os.getenv("LOCAL_LLM_MODEL", "Qwen3-Vl-4B-Instruct")
 
 client = AsyncOpenAI(
     base_url=LOCAL_LLM_URL,
@@ -100,7 +104,7 @@ async def extract_specs(title: str, desc: str, price: str, img_path: str | None)
     try:
         print(f"LOG: Extracting specs for {title}...")
         response = await client.chat.completions.create(
-            model="default",
+            model=MODEL_NAME,
             messages=messages,
             max_tokens=800,
             temperature=0.0

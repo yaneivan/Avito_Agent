@@ -50,10 +50,10 @@ class ProcessingService:
                         if pydantic_model:
                             try:
                                 extracted_data = await extract_specs(
-                                    item_title=db_item.title,
-                                    item_desc=db_item.description or "",
-                                    item_price=db_item.price,
-                                    image_path=db_item.image_path
+                                    title=db_item.title,
+                                    desc=db_item.description or "",
+                                    price=db_item.price,
+                                    img_path=db_item.image_path
                                 )
                                 db_item.structured_data = json.dumps(extracted_data, ensure_ascii=False)
                                 session.add(db_item); session.commit()
