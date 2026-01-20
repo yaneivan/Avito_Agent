@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Avito Agent</title>
+    <!-- Подключаем парсер Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #121212; color: #e0e0e0; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* SIDEBAR */
+        #sidebar { width: 350px; min-width: 300px; flex-shrink: 0; background: #1a1a1a; border-right: 1px solid #333; display: flex; flex-direction: column; position: relative; }
+        #chat-header { padding: 20px; font-weight: bold; color: #4CAF50; border-bottom: 1px solid #333; }
+        
+        #chat-window { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; padding-bottom: 80px; }
+        
+        .msg { padding: 12px 16px; border-radius: 8px; max-width: 90%; font-size: 0.95rem; line-height: 1.5; word-wrap: break-word; }
+        .msg-user { background: #2d2d2d; align-self: flex-end; color: white; border-bottom-right-radius: 2px; }
+        .msg-bot { background: #262626; align-self: flex-start; border-left: 3px solid #4CAF50; border-bottom-left-radius: 2px; }
+        
+        /* Markdown стили внутри сообщений */
+        .msg-bot p { margin: 0 0 10px 0; }
+        .msg-bot p:last-child { margin: 0; }
+        .msg-bot ul { margin: 5px 0; padding-left: 20px; }
+        .msg-bot strong { color: #81c784; }
+
+        .msg-plan { background: #1e1e1e; align-self: flex-start; width: 100%; border: 1px solid #444; font-size: 0.8rem; padding: 10px; box-sizing: border-box; border-radius: 6px; }
+        .reasoning { color: #aaa; font-style: italic; margin-bottom: 5px; padding-bottom: 5px; border-bottom: 1px solid #333; }
+        
+        #input-area { padding: 20px; background: #1a1a1a; border-top: 1px solid #333; position: absolute; bottom: 0; width: 100%; box-sizing: border-box; }
+        #inp { width: 100%; padding: 12px; background: #2d2d2d; border: 1px solid #444; border-radius: 6px; color: white; outline: none; box-sizing: border-box; }
+        #inp:focus { border-color: #4CAF50; }
+        #inp:disabled { opacity: 0.5; cursor: wait; }
+
+        /* SETTINGS */
+        #settings { padding: 10px 20px; border-bottom: 1px solid #333; display: flex; gap: 15px; font-size: 0.8rem; color: #888; }
+        label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+        /* MAIN CONTENT */
+        #main { flex: 1; display: flex; flex-direction: column; background: #0f0f0f; min-width: 0; }
+        
+        #status-bar { padding: 15px 20px; color: #4CAF50; font-size: 0.9rem; border-bottom: 1px solid #333; display: none; }
+        
+        #grid { flex: 1; overflow-y: auto; padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; align-content: start; }
+        
+        .card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s; }
+        .card:hover { border-color: #4CAF50; transform: translateY(-2px); }
+        .card img { width: 100%; height: 140px; object-fit: cover; background: #252525; }
+        .card-body { padding: 12px; flex: 1; display: flex; flex-direction: column; }
+        .price { color: #4CAF50; font-weight: bold; font-size: 1.1rem; margin-bottom: 5px; }
+        .title a { color: #e0e0e0; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: block; line-height: 1.3; margin-bottom: 8px; }
+        .title a:hover { text-decoration: underline; }
+        .specs { font-size: 0.75rem; color: #888; margin-top: auto; border-top: 1px solid #333; padding-top: 8px; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div id="chat-header">Агент</div>
+    <div id="settings">
+        <label><input type="checkbox" id="chk-browser" checked> Браузер</label>
+        <label><input type="checkbox" id="chk-cache" checked> Кэш</label>
+    </div>
+    <div id="chat-window">
+        <div class="msg bot">Привет! Напиши запрос, и я найду варианты.</div>
+    </div>
+    <div id="input-area">
+        <input type="text" id="inp" placeholder="Введите запрос (например: макбук м1)...">
+    </div>
+</div>
+
+<div id="main">
+    <div id="status-bar">Ожидание...</div>
+    <div id="grid">
+        <div style="color: #555; text-align: center; margin-top: 50px; grid-column: 1/-1;">Здесь появятся результаты поиска</div>
+    </div>
+</div>
+
+<script>
+    let taskId = null;
+    let history = [{role: "assistant", content: "Привет! Напиши запрос."}];
+    let summaryDisplayed = false;
+    let pollTimer = null;
+
+    const chat = document.getElementById('chat-window');
+    const inp = document.getElementById('inp');
+    const grid = document.getElementById('grid');
+    const statusBar = document.getElementById('status-bar');
+
+    // Функция добавления сообщения
+    function addMsg(role, text, isHtml = false) {
+        const div = document.createElement('div');
+        div.className = `msg msg-${role}`;
+        
+        if (isHtml) {
+            div.innerHTML = text; // Для отрендеренного markdown
+        } else {
+            div.innerText = text;
+        }
+        
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+        return div;
+    }
+
+    function addPlan(plan) {
+        const div = document.createElement('div');
+        div.className = 'msg msg-plan';
+        div.innerHTML = `
+            <div class="reasoning">💭 ${plan.reasoning || 'Анализирую запрос...'}</div>
+            <div>🔍 <b>${plan.search_query || '-'}</b> (${plan.limit} шт)</div>
+            <div style="font-size:0.7rem; color:#666; margin-top:5px">Схема: ${plan.schema_name}</div>
+        `;
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+    }
+
+    inp.addEventListener('keypress', async (e) => {
+        if (e.key === 'Enter' && inp.value.trim()) {
+            const txt = inp.value.trim();
+            inp.value = '';
+            inp.disabled = true;
+            
+            addMsg('user', txt);
+            history.push({role: "user", content: txt});
+
+            try {
+                const res = await fetch('/api/agent/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        history: history,
+                        open_browser: document.getElementById('chk-browser').checked,
+                        use_cache: document.getElementById('chk-cache').checked
+                    })
+                });
+                const data = await res.json();
+
+                // 1. Показываем план (если есть)
+                if (data.plan && data.plan.action === 'search') {
+                    addPlan(data.plan);
+                }
+
+                // 2. Обработка ответа
+                if (data.type === 'chat') {
+                    // Обычный ответ (рендерим MD)
+                    addMsg('bot', marked.parse(data.message), true);
+                    history.push({role: "assistant", content: data.message});
+                    inp.disabled = false;
+                } 
+                else if (data.type === 'search') {
+                    // Запуск поиска
+                    addMsg('bot', `🚀 ${data.message}`);
+                    taskId = data.task_id;
+                    
+                    // Сброс UI
+                    grid.innerHTML = '';
+                    statusBar.style.display = 'block';
+                    statusBar.innerText = 'Запуск...';
+                    summaryDisplayed = false;
+                    
+                    startPolling();
+                }
+            } catch (err) {
+                console.error(err);
+                addMsg('bot', '❌ Ошибка связи с сервером');
+                inp.disabled = false;
+            }
+        }
+    });
+
+    function startPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        
+        pollTimer = setInterval(async () => {
+            if (!taskId) return;
+
+            try {
+                // 1. Статус
+                const sRes = await fetch(`/api/searches/${taskId}/status`);
+                const sData = await sRes.json();
+                
+                statusBar.innerText = `Статус задачи: ${sData.status}...`;
+
+                // 2. Товары
+                const iRes = await fetch(`/api/searches/${taskId}/items`);
+                const items = await iRes.json();
+                
+                renderGrid(items);
+
+                // 3. Финал
+                if (sData.status === 'done' || sData.status === 'cached') {
+                    statusBar.innerText = '✅ Готово';
+                    
+                    // Если есть отчет и мы его еще не показали
+                    if (sData.summary && !summaryDisplayed) {
+                        summaryDisplayed = true;
+                        clearInterval(pollTimer);
+                        
+                        // Рендерим Markdown красиво
+                        const htmlSummary = marked.parse(sData.summary);
+                        addMsg('bot', htmlSummary, true);
+                        
+                        history.push({role: "assistant", content: sData.summary});
+                        inp.disabled = false;
+                    }
+                    else if (!sData.summary) {
+                        // Если статус done, но отчета нет (ошибка генерации)
+                        clearInterval(pollTimer);
+                        addMsg('bot', '⚠️ Поиск завершен, но отчет не сгенерирован.');
+                        inp.disabled = false;
+                    }
+                }
+            } catch (e) {
+                console.error("Poll error", e);
+            }
+        }, 2000);
+    }
+
+    function renderGrid(items) {
+        if (items.length === 0) return;
+        
+        // Перерисовываем только если количество изменилось (чтобы не моргало)
+        // Но для простоты можно и всегда, браузер справится
+        grid.innerHTML = items.map(item => {
+            let specsHtml = '';
+            if (item.structured_data) {
+                try {
+                    const sd = JSON.parse(item.structured_data);
+                    // Берем первые 3 поля для превью
+                    specsHtml = Object.entries(sd)
+                        .slice(0, 3)
+                        .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+                        .join('');
+                } catch(e) {}
+            }
+
+            return `
+            <div class="card">
+                <img src="${item.image_url || 'https://via.placeholder.com/200x140?text=No+Photo'}">
+                <div class="card-body">
+                    <div class="price">${item.price}</div>
+                    <div class="title"><a href="${item.url}" target="_blank">${item.title}</a></div>
+                    <div class="specs">${specsHtml}</div>
+                </div>
+            </div>
+            `;
+        }).join('');
+    }
+</script>
+
+</body>
+</html>

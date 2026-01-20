@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Avito Agent Bot",
+  "version": "1.1",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "*://*.avito.ru/*",
+    "*://avito.ru/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.avito.ru/*", "*://avito.ru/*"],
+      "js": [
+        "config.js",
+        "utils.js",
+        "parsers.js",
+        "actions.js",
+        "main.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}

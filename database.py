@@ -1,0 +1,52 @@
+from typing import Optional, List
+from sqlmodel import Field, SQLModel, create_engine, Relationship
+from datetime import datetime
+
+class SearchItemLink(SQLModel, table=True):
+    search_id: int = Field(foreign_key="searchsession.id", primary_key=True)
+    item_id: int = Field(foreign_key="item.id", primary_key=True)
+
+class ExtractionSchema(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str 
+    description: str 
+    structure_json: str 
+    searches: List["SearchSession"] = Relationship(back_populates="schema_model")
+
+class SearchSession(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    query_text: str 
+    status: str = Field(default="pending") 
+    created_at: datetime = Field(default_factory=datetime.now)
+    
+    # Настройки
+    limit_count: int = Field(default=20) 
+    open_in_browser: bool = Field(default=True)
+    use_cache: bool = Field(default=False)
+    
+    # Результат анализа (ответ чата)
+    summary: Optional[str] = None # <-- НОВОЕ ПОЛЕ
+    
+    schema_id: Optional[int] = Field(default=None, foreign_key="extractionschema.id")
+    schema_model: Optional[ExtractionSchema] = Relationship(back_populates="searches")
+    
+    items: List["Item"] = Relationship(back_populates="searches", link_model=SearchItemLink)
+
+class Item(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    url: str = Field(unique=True, index=True) 
+    title: str
+    price: str
+    description: Optional[str] = None
+    image_path: Optional[str] = None
+    raw_json: str 
+    structured_data: Optional[str] = None 
+    
+    searches: List[SearchSession] = Relationship(back_populates="items", link_model=SearchItemLink)
+
+sqlite_file_name = "database.db"
+sqlite_url = f"sqlite:///{sqlite_file_name}"
+engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)

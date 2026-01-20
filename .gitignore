@@ -1,0 +1,5 @@
+/__pycache__
+.env
+database.db
+/images
+/tests/__pycache__
