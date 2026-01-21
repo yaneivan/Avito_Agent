@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Avito Agent - Глубокий анализ</title>
+    <!-- Подключаем парсер Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background: #121212; 
+            color: #e0e0e0; 
+            margin: 0; 
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 40px);
+            gap: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #333;
+            color: #4CAF50;
+        }
+        
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a1a;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        .chat-header {
+            padding: 15px 20px;
+            background: #222;
+            border-bottom: 1px solid #333;
+            font-weight: bold;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .msg { 
+            padding: 12px 16px; 
+            border-radius: 8px; 
+            max-width: 80%; 
+            font-size: 0.95rem; 
+            line-height: 1.5; 
+            word-wrap: break-word; 
+        }
+        .msg-user { 
+            background: #2d2d2d; 
+            align-self: flex-end; 
+            color: white; 
+            border-bottom-right-radius: 2px; 
+        }
+        .msg-bot { 
+            background: #262626; 
+            align-self: flex-start; 
+            border-left: 3px solid #4CAF50; 
+            border-bottom-left-radius: 2px; 
+        }
+        
+        /* Markdown стили внутри сообщений */
+        .msg-bot p { margin: 0 0 10px 0; }
+        .msg-bot p:last-child { margin: 0; }
+        .msg-bot ul { margin: 5px 0; padding-left: 20px; }
+        .msg-bot strong { color: #81c784; }
+        
+        .input-area {
+            padding: 20px;
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+        }
+        
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        
+        #inp { 
+            flex: 1;
+            padding: 12px; 
+            background: #2d2d2d; 
+            border: 1px solid #444; 
+            border-radius: 6px; 
+            color: white; 
+            outline: none; 
+        }
+        #inp:focus { border-color: #4CAF50; }
+        #inp:disabled { opacity: 0.5; cursor: wait; }
+        
+        .btn { 
+            padding: 12px 20px; 
+            background: #4CAF50; 
+            color: white; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-weight: bold;
+        }
+        .btn:disabled { 
+            background: #555; 
+            cursor: not-allowed; 
+        }
+        
+        .btn-secondary {
+            background: #666;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .editor-container { 
+            padding: 20px; 
+            background: #1e1e1e; 
+            border: 1px solid #333; 
+            border-radius: 8px; 
+            margin: 10px 0; 
+        }
+        .json-editor { 
+            width: 100%; 
+            height: 200px; 
+            background: #252525; 
+            color: white; 
+            border: 1px solid #444; 
+            border-radius: 4px; 
+            padding: 10px; 
+            font-family: monospace; 
+            resize: vertical; 
+        }
+        
+        .progress-container {
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .progress-bar { 
+            width: 100%; 
+            height: 20px; 
+            background: #333; 
+            border-radius: 10px; 
+            overflow: hidden; 
+            margin: 10px 0; 
+            position: relative;
+        }
+        .progress-fill { 
+            height: 100%; 
+            background: #4CAF50; 
+            width: 0%; 
+            transition: width 0.3s; 
+        }
+        
+        .results-container {
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .results-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+            gap: 20px; 
+            margin-top: 20px; 
+        }
+        
+        .card { 
+            background: #1e1e1e; 
+            border: 1px solid #333; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column; 
+            transition: transform 0.2s; 
+        }
+        .card:hover { 
+            border-color: #4CAF50; 
+            transform: translateY(-2px); 
+        }
+        .card img { 
+            width: 100%; 
+            height: 140px; 
+            object-fit: cover; 
+            background: #252525; 
+        }
+        .card-body { 
+            padding: 12px; 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        .price { 
+            color: #4CAF50; 
+            font-weight: bold; 
+            font-size: 1.1rem; 
+            margin-bottom: 5px; 
+        }
+        .title a { 
+            color: #e0e0e0; 
+            text-decoration: none; 
+            font-size: 0.9rem; 
+            font-weight: 500; 
+            display: block; 
+            line-height: 1.3; 
+            margin-bottom: 8px; 
+        }
+        .title a:hover { 
+            text-decoration: underline; 
+        }
+        .specs { 
+            font-size: 0.75rem; 
+            color: #888; 
+            margin-top: auto; 
+            border-top: 1px solid #333; 
+            padding-top: 8px; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Глубокий анализ рынка</h1>
+        </div>
+        
+        <!-- Interview Stage -->
+        <div id="interview-stage" class="chat-container">
+            <div class="chat-header">Интервью - Сбор требований</div>
+            <div id="chat-messages" class="chat-messages">
+                <div class="msg msg-bot">Привет! Я помогу вам провести глубокий анализ рынка. Отвечайте на мои вопросы, чтобы я мог лучше понять ваши потребности.</div>
+            </div>
+            <div class="input-area">
+                <div class="input-container">
+                    <input type="text" id="inp" placeholder="Ответьте на вопросы агента...">
+                    <button id="send-btn" class="btn">Отправить</button>
+                    <button id="finish-interview-btn" class="btn btn-secondary">Завершить интервью</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Schema Agreement Stage -->
+        <div id="schema-stage" class="hidden chat-container">
+            <div class="chat-header">Согласование схемы извлечения данных</div>
+            <div class="results-container">
+                <h3>Согласование схемы извлечения данных</h3>
+                <p>На основе интервью я подготовил схему для извлечения характеристик из объявлений:</p>
+                <div class="editor-container">
+                    <textarea id="schema-editor" class="json-editor" placeholder="Здесь появится предложенная схема..."></textarea>
+                </div>
+                <div style="margin-top: 15px;">
+                    <button id="confirm-schema-btn" class="btn">Подтвердить схему</button>
+                    <button id="back-to-interview-btn" class="btn btn-secondary">Назад к интервью</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Parsing Progress Stage -->
+        <div id="parsing-stage" class="hidden progress-container">
+            <h3>Сбор данных с Avito</h3>
+            <p>Собираем 200 объявлений для глубокого анализа...</p>
+            <div class="progress-bar">
+                <div id="parsing-progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="parsing-status">Собрано: <span id="parsed-count">0</span>/200</div>
+            <div style="margin-top: 20px;">
+                <button id="skip-parsing-btn" class="btn">Пропустить сбор</button>
+            </div>
+        </div>
+        
+        <!-- Analysis Results Stage -->
+        <div id="results-stage" class="hidden results-container">
+            <h3>Результаты глубокого анализа</h3>
+            <div id="analysis-summary" style="margin: 20px 0; padding: 15px; background: #1e1e1e; border-radius: 8px;"></div>
+            <h4>Топ-20 товаров по вашим критериям:</h4>
+            <div id="top-items-grid" class="results-grid"></div>
+        </div>
+    </div>
+
+    <script>
+        // State variables
+        let currentStage = 'interview'; // 'interview', 'schema', 'parsing', 'results'
+        let deepSearchId = null;
+        let deepHistory = [
+            {role: "assistant", content: "Привет! Я помогу вам провести глубокий анализ рынка. Отвечайте на мои вопросы, чтобы я мог лучше понять ваши потребности."}
+        ];
+
+        // DOM Elements
+        const chatMessages = document.getElementById('chat-messages');
+        const inp = document.getElementById('inp');
+        const sendBtn = document.getElementById('send-btn');
+        const finishInterviewBtn = document.getElementById('finish-interview-btn');
+        const schemaEditor = document.getElementById('schema-editor');
+        const confirmSchemaBtn = document.getElementById('confirm-schema-btn');
+        const backToInterviewBtn = document.getElementById('back-to-interview-btn');
+        const skipParsingBtn = document.getElementById('skip-parsing-btn');
+        const parsingProgressFill = document.getElementById('parsing-progress-fill');
+        const parsedCountSpan = document.getElementById('parsed-count');
+        const analysisSummary = document.getElementById('analysis-summary');
+        const topItemsGrid = document.getElementById('top-items-grid');
+
+        // Add message to chat
+        function addMsg(role, text, isHtml = false) {
+            const div = document.createElement('div');
+            div.className = `msg msg-${role}`;
+
+            if (isHtml) {
+                div.innerHTML = text;
+            } else {
+                div.innerText = text;
+            }
+
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return div;
+        }
+
+        // Show specific stage
+        function showStage(stage) {
+            currentStage = stage;
+            
+            // Hide all stages
+            document.getElementById('interview-stage').classList.add('hidden');
+            document.getElementById('schema-stage').classList.add('hidden');
+            document.getElementById('parsing-stage').classList.add('hidden');
+            document.getElementById('results-stage').classList.add('hidden');
+            
+            // Show current stage
+            document.getElementById(`${stage}-stage`).classList.remove('hidden');
+        }
+
+        // Send message handler
+        async function sendMessage() {
+            const txt = inp.value.trim();
+            if (!txt) return;
+            
+            inp.value = '';
+            inp.disabled = true;
+            sendBtn.disabled = true;
+
+            // Add user message
+            addMsg('user', txt);
+            deepHistory.push({role: "user", content: txt});
+
+            try {
+                const res = await fetch('/api/deep_research/interview', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        history: deepHistory
+                    })
+                });
+                const data = await res.json();
+
+                if (data.type === 'interview') {
+                    // Add bot response
+                    addMsg('assistant', marked.parse(data.message), true);
+                    deepHistory.push({role: "assistant", content: data.message});
+                    
+                    // Store search ID
+                    if (data.search_id) {
+                        deepSearchId = data.search_id;
+                    }
+                    
+                    // Check if we can move to next stage
+                    if (!data.needs_more_info) {
+                        setTimeout(() => {
+                            generateAndShowSchemaProposal();
+                        }, 1000);
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+                addMsg('assistant', '❌ Ошибка связи с сервером');
+            }
+            
+            inp.disabled = false;
+            sendBtn.disabled = false;
+        }
+
+        // Generate and show schema proposal
+        async function generateAndShowSchemaProposal() {
+            try {
+                const res = await fetch(`/api/deep_research/generate_schema_proposal?search_id=${deepSearchId}`, {
+                    method: 'GET',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await res.json();
+                
+                if (data.schema_proposal) {
+                    schemaEditor.value = data.schema_proposal;
+                    showStage('schema');
+                }
+            } catch (err) {
+                console.error(err);
+                addMsg('assistant', '❌ Ошибка при генерации схемы');
+            }
+        }
+
+        // Event listeners
+        sendBtn.addEventListener('click', sendMessage);
+        
+        inp.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        finishInterviewBtn.addEventListener('click', () => {
+            generateAndShowSchemaProposal();
+        });
+        
+        confirmSchemaBtn.addEventListener('click', async () => {
+            const schemaJson = schemaEditor.value;
+            
+            try {
+                // Validate JSON
+                JSON.parse(schemaJson);
+                
+                const res = await fetch('/api/deep_research/schema_agreement', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        search_id: deepSearchId,
+                        schema_json: schemaJson
+                    })
+                });
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    // Move to parsing stage
+                    showStage('parsing');
+                    
+                    // Start parsing
+                    startParsingPhase();
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Ошибка: некорректный формат JSON');
+            }
+        });
+        
+        backToInterviewBtn.addEventListener('click', () => {
+            showStage('interview');
+        });
+        
+        skipParsingBtn.addEventListener('click', () => {
+            // Skip directly to analysis
+            showStage('results');
+            fetchAnalysisResults();
+        });
+
+        // Start parsing phase
+        async function startParsingPhase() {
+            try {
+                const res = await fetch(`/api/deep_research/start_parsing?search_id=${deepSearchId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await res.json();
+                
+                // Simulate parsing progress
+                simulateParsingProgress();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // Simulate parsing progress
+        function simulateParsingProgress() {
+            let count = 0;
+            const target = 200;
+            const interval = setInterval(() => {
+                if (count < target) {
+                    count += Math.floor(Math.random() * 10) + 1; // Random increment
+                    if (count > target) count = target;
+                    
+                    const percent = (count / target) * 100;
+                    parsingProgressFill.style.width = `${percent}%`;
+                    parsedCountSpan.textContent = count;
+                } else {
+                    clearInterval(interval);
+                    // Move to analysis after "parsing" is complete
+                    setTimeout(() => {
+                        showStage('results');
+                        fetchAnalysisResults();
+                    }, 1000);
+                }
+            }, 500);
+        }
+
+        // Fetch analysis results
+        async function fetchAnalysisResults() {
+            try {
+                const res = await fetch(`/api/deep_research/execute_analysis?search_id=${deepSearchId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await res.json();
+                
+                if (data.status === 'completed') {
+                    // Get the search session to retrieve the summary
+                    const sessionRes = await fetch(`/api/searches/${deepSearchId}/status`);
+                    const sessionData = await sessionRes.json();
+                    
+                    if (sessionData.summary) {
+                        analysisSummary.innerHTML = marked.parse(sessionData.summary);
+                    } else {
+                        analysisSummary.innerHTML = '<p>Результаты анализа будут доступны позже.</p>';
+                    }
+                    
+                    // Get the items
+                    const itemsRes = await fetch(`/api/searches/${deepSearchId}/items`);
+                    const items = await itemsRes.json();
+                    
+                    renderTopItemsGrid(items.slice(0, 20)); // Top 20 items
+                }
+            } catch (err) {
+                console.error(err);
+                analysisSummary.innerHTML = '<p>Ошибка при получении результатов анализа.</p>';
+            }
+        }
+
+        // Render top items grid
+        function renderTopItemsGrid(items) {
+            if (items.length === 0) {
+                topItemsGrid.innerHTML = '<div style="color: #555; text-align: center; margin: 50px auto;">Нет данных для отображения</div>';
+                return;
+            }
+
+            topItemsGrid.innerHTML = items.map(item => {
+                let specsHtml = '';
+                if (item.structured_data) {
+                    try {
+                        const sd = JSON.parse(item.structured_data);
+                        // Берем первые 3 поля для превью
+                        specsHtml = Object.entries(sd)
+                            .slice(0, 3)
+                            .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`)
+                            .join('');
+                    } catch(e) {}
+                }
+
+                return `
+                <div class="card">
+                    <img src="${item.image_url || 'https://via.placeholder.com/200x140?text=No+Photo'}">
+                    <div class="card-body">
+                        <div class="price">${item.price}</div>
+                        <div class="title"><a href="${item.url}" target="_blank">${item.title}</a></div>
+                        <div class="specs">${specsHtml}</div>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+    </script>
+</body>
+</html>

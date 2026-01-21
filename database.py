@@ -20,21 +20,26 @@ class ExtractionSchema(SQLModel, table=True):
 
 class SearchSession(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    query_text: str 
-    status: str = Field(default="pending") 
+    query_text: str
+    status: str = Field(default="pending")  # General status (pending, processing, done, etc.)
+    mode: str = Field(default="quick")  # Mode: "quick" or "deep"
+    stage: str = Field(default="interview")  # Stage for deep mode: "interview", "schema_agreement", "parsing", "analysis", "completed"
     created_at: datetime = Field(default_factory=datetime.now)
-    
+
     # Настройки
-    limit_count: int = Field(default=int(os.getenv("DEFAULT_LIMIT_COUNT", "20"))) 
+    limit_count: int = Field(default=int(os.getenv("DEFAULT_LIMIT_COUNT", "20")))
     open_in_browser: bool = Field(default=True)
     use_cache: bool = Field(default=False)
-    
+
     # Результат анализа (ответ чата)
     summary: Optional[str] = None # <-- НОВОЕ ПОЛЕ
-    
+    interview_data: Optional[str] = None  # JSON string storing interview responses
+    schema_agreed: Optional[str] = None  # JSON string storing agreed schema
+    analysis_result: Optional[str] = None  # Analysis result for deep research
+
     schema_id: Optional[int] = Field(default=None, foreign_key="extractionschema.id")
     schema_model: Optional[ExtractionSchema] = Relationship(back_populates="searches")
-    
+
     items: List["Item"] = Relationship(back_populates="searches", link_model=SearchItemLink)
 
 class Item(SQLModel, table=True):

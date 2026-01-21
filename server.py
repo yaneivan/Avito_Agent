@@ -1,6 +1,6 @@
 import os, json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from database import create_db_and_tables, engine, SearchSession, ExtractionSchema, Item, SearchItemLink
 from services import ProcessingService
 from image_utils import save_base64_image
-from llm_engine import decide_action, generate_schema_structure
+from llm_engine import decide_action, generate_schema_structure, conduct_interview, generate_schema_proposal, generate_sql_query
 
 class ItemSchema(BaseModel):
     title: str; price: str; url: str; description: Optional[str] = None; image_base64: Optional[str] = None; local_path: Optional[str] = None 
@@ -24,6 +24,17 @@ class ChatRequest(BaseModel):
 
 class LogMessage(BaseModel):
     source: str; message: str; level: str = "info"
+
+class InterviewRequest(BaseModel):
+    history: List[Dict[str, Any]]
+
+class SchemaAgreementRequest(BaseModel):
+    search_id: int
+    schema_json: str
+
+class SqlGenerationRequest(BaseModel):
+    search_id: int
+    criteria: str
 
 service = ProcessingService()
 
@@ -40,6 +51,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(): return FileResponse("templates/index.html")
+
+@app.get("/deep_research", response_class=HTMLResponse)
+async def deep_research(): return FileResponse("templates/deep_research.html")
 
 @app.post("/api/agent/chat")
 async def agent_chat(req: ChatRequest):
@@ -123,3 +137,223 @@ def get_search_items(search_id: int):
 
 @app.post("/api/log")
 def remote_log(log: LogMessage): return {"status": "ok"}
+
+@app.post("/api/deep_research/interview")
+async def deep_research_interview(req: InterviewRequest):
+    """Endpoint for conducting the interview phase of deep research"""
+    print(f"\n[API] Deep Research Interview Request: {req.history[-1]['content'] if req.history else 'No history'}")
+
+    # Create a new search session in deep mode
+    with Session(engine) as session:
+        # Find existing session in interview stage or create new one
+        existing_session = session.exec(
+            select(SearchSession).where(
+                SearchSession.mode == "deep",
+                SearchSession.stage == "interview",
+                SearchSession.status == "pending"
+            ).order_by(desc(SearchSession.created_at))
+        ).first()
+
+        if not existing_session:
+            # Create a new deep research session
+            new_session = SearchSession(
+                query_text=req.history[-1]['content'] if req.history else "Deep Research Query",
+                mode="deep",
+                stage="interview",
+                status="pending",
+                limit_count=200  # Default for deep research
+            )
+            session.add(new_session)
+            session.commit()
+            session.refresh(new_session)
+            search_session = new_session
+        else:
+            search_session = existing_session
+
+        # Conduct the interview using LLM
+        interview_response = await conduct_interview(req.history)
+
+        # Update session with interview data if needed
+        if search_session.interview_data:
+            interview_data = json.loads(search_session.interview_data)
+        else:
+            interview_data = {}
+
+        # Add the latest response to interview data
+        interview_data[len(interview_data)] = {
+            "question": req.history[-1]['content'] if req.history else "",
+            "response": interview_response.get("response", ""),
+            "needs_more_info": interview_response.get("needs_more_info", True)
+        }
+
+        search_session.interview_data = json.dumps(interview_data, ensure_ascii=False)
+
+        # Move to next stage if enough info gathered
+        if not interview_response.get("needs_more_info", True):
+            search_session.stage = "schema_agreement"
+
+        session.add(search_session)
+        session.commit()
+
+        return {
+            "type": "interview",
+            "message": interview_response.get("response", ""),
+            "needs_more_info": interview_response.get("needs_more_info", True),
+            "search_id": search_session.id,
+            "stage": search_session.stage
+        }
+
+@app.post("/api/deep_research/generate_schema_proposal")
+async def deep_research_generate_schema_proposal(search_id: int):
+    """Endpoint to generate schema proposal based on interview data"""
+    with Session(engine) as session:
+        search_session = session.get(SearchSession, search_id)
+        if not search_session:
+            raise HTTPException(status_code=404, detail="Search session not found")
+
+        if search_session.mode != "deep":
+            raise HTTPException(status_code=400, detail="Not a deep research session")
+
+        # Generate schema based on interview data
+        criteria_summary = ""
+        if search_session.interview_data:
+            try:
+                interview_data = json.loads(search_session.interview_data)
+                # Extract criteria from interview data
+                for entry in interview_data.values():
+                    if "criteria_summary" in entry:
+                        criteria_summary = entry["criteria_summary"]
+                        break
+                    elif "response" in entry:
+                        criteria_summary += entry["response"] + " "
+            except:
+                criteria_summary = "Пользователь хочет купить товар"
+
+        schema_proposal = await generate_schema_proposal(criteria_summary)
+
+        return {
+            "schema_proposal": schema_proposal,
+            "search_id": search_session.id
+        }
+
+@app.post("/api/deep_research/schema_agreement")
+async def deep_research_schema_agreement(req: SchemaAgreementRequest):
+    """Endpoint for schema agreement phase of deep research"""
+    with Session(engine) as session:
+        search_session = session.get(SearchSession, req.search_id)
+        if not search_session:
+            raise HTTPException(status_code=404, detail="Search session not found")
+
+        if search_session.mode != "deep":
+            raise HTTPException(status_code=400, detail="Not a deep research session")
+
+        # Update the agreed schema
+        search_session.schema_agreed = req.schema_json
+        search_session.stage = "parsing"
+        search_session.status = "pending"
+
+        # Create or update the extraction schema
+        schema_name = f"DeepResearch_{search_session.id}"
+        existing_schema = session.exec(
+            select(ExtractionSchema).where(ExtractionSchema.name == schema_name)
+        ).first()
+
+        if existing_schema:
+            existing_schema.structure_json = req.schema_json
+            session.add(existing_schema)
+        else:
+            new_schema = ExtractionSchema(
+                name=schema_name,
+                description=f"Schema for deep research session {req.search_id}",
+                structure_json=req.schema_json
+            )
+            session.add(new_schema)
+            session.commit()
+            session.refresh(new_schema)
+            search_session.schema_id = new_schema.id
+
+        session.add(search_session)
+        session.commit()
+
+        return {
+            "status": "success",
+            "message": "Schema agreed and saved",
+            "next_stage": "parsing",
+            "search_id": search_session.id
+        }
+
+@app.post("/api/deep_research/start_parsing")
+async def deep_research_start_parsing(search_id: int):
+    """Endpoint to start the parsing phase of deep research"""
+    with Session(engine) as session:
+        search_session = session.get(SearchSession, search_id)
+        if not search_session:
+            raise HTTPException(status_code=404, detail="Search session not found")
+
+        if search_session.mode != "deep":
+            raise HTTPException(status_code=400, detail="Not a deep research session")
+
+        if search_session.stage != "parsing":
+            raise HTTPException(status_code=400, detail="Invalid stage for parsing")
+
+        # Update session to processing state
+        search_session.status = "processing"
+        session.add(search_session)
+        session.commit()
+
+        return {
+            "status": "started",
+            "message": "Parsing started",
+            "search_id": search_session.id
+        }
+
+@app.post("/api/deep_research/generate_sql")
+async def deep_research_generate_sql(req: SqlGenerationRequest):
+    """Endpoint to generate SQL query for analysis phase"""
+    with Session(engine) as session:
+        search_session = session.get(SearchSession, req.search_id)
+        if not search_session:
+            raise HTTPException(status_code=404, detail="Search session not found")
+
+        if search_session.mode != "deep":
+            raise HTTPException(status_code=400, detail="Not a deep research session")
+
+        # Generate SQL query based on criteria and agreed schema
+        sql_query = await generate_sql_query(req.criteria, search_session.schema_agreed)
+
+        return {
+            "sql_query": sql_query,
+            "search_id": search_session.id
+        }
+
+@app.post("/api/deep_research/execute_analysis")
+async def deep_research_execute_analysis(search_id: int):
+    """Endpoint to execute the analysis phase"""
+    with Session(engine) as session:
+        search_session = session.get(SearchSession, search_id)
+        if not search_session:
+            raise HTTPException(status_code=404, detail="Search session not found")
+
+        if search_session.mode != "deep":
+            raise HTTPException(status_code=400, detail="Not a deep research session")
+
+        # Move to analysis stage
+        search_session.stage = "analysis"
+        search_session.status = "processing"
+        session.add(search_session)
+        session.commit()
+
+        # Process the items using the agreed schema
+        await service.process_incoming_data(search_id, [], is_deep_analysis=True)
+
+        # Update to completed stage
+        search_session.stage = "completed"
+        search_session.status = "done"
+        session.add(search_session)
+        session.commit()
+
+        return {
+            "status": "completed",
+            "message": "Analysis completed",
+            "search_id": search_session.id
+        }

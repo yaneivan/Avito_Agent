@@ -72,9 +72,9 @@ async def decide_action(history: list, available_schemas: list[str]) -> dict:
         return json.loads(content)
     except:
         return {
-            "action": "chat", 
-            "reply": "Я готов помочь. Что ищем?", 
-            "reasoning": "Ошибка парсинга",
+            "action": "chat",
+            "reply": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
+            "reasoning": "Ошибка подключения к LLM",
             "search_query": None,
             "limit": 5,
             "schema_name": None
@@ -182,3 +182,123 @@ async def summarize_search_results(query: str, items: list) -> str:
 async def plan_search_action(user_text: str) -> dict:
     """Для обратной совместимости с вызовами в server.py"""
     return await decide_action([{"role": "user", "content": user_text}], [])
+
+async def conduct_interview(history: list) -> dict:
+    """Conduct an interview to gather user requirements for deep research"""
+    context_str = ""
+    for msg in history[-5:]:  # Take last 5 messages
+        role = "User" if msg["role"] == "user" else "Assistant"
+        content = msg.get("content", "")
+        context_str += f"{role}: {content}\n"
+
+    prompt = f"""Ты — интервьюер для глубокого анализа рынка.
+Твоя задача: задавать уточняющие вопросы пользователю, чтобы собрать полный портрет его потребностей.
+
+ИСТОРИЯ:
+{context_str}
+
+ИНСТРУКЦИЯ:
+- Задавай уточняющие вопросы: бюджет, предпочтения по характеристикам, состояние, бренды, критичные дефекты и т.д.
+- Не начинай поиск сразу, собирай информацию.
+- После каждого ответа пользователя оценивай, достаточно ли информации для формирования схемы извлечения.
+- Отвечай в формате JSON.
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "response": "текст вопроса или ответа",
+    "needs_more_info": true/false,
+    "criteria_summary": "краткое резюме собранных критериев"
+}}"""
+
+    try:
+        response = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=500
+        )
+        content = response.choices[0].message.content
+        if "```" in content:
+            content = content.split("```")[1].replace("json", "").strip()
+        return json.loads(content)
+    except Exception as e:
+        print(f"Interview error: {e}")
+        return {
+            "response": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
+            "needs_more_info": False,
+            "criteria_summary": "не определены"
+        }
+
+async def generate_schema_proposal(criteria: str) -> str:
+    """Generate a schema proposal based on gathered criteria"""
+    prompt = f"""Создай JSON-схему для извлечения характеристик из объявлений на Avito.
+КРИТЕРИИ ПОЛЬЗОВАТЕЛЯ: {criteria}
+
+ИНСТРУКЦИЯ:
+- Создай 5-8 полей, которые помогут отфильтровать товары по указанным критериям
+- Используй только типы "str", "int", "float"
+- Каждое поле должно иметь "type" и "desc" (описание)
+- Схема должна позволить провести SQL-фильтрацию по критериям пользователя
+- Верни ТОЛЬКО чистый JSON-объект схемы."""
+
+    try:
+        response = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=600
+        )
+        res = response.choices[0].message.content
+        if "```" in res:
+            res = res.split("```")[1].replace("json", "").strip()
+        parsed_res = json.loads(res)
+        return json.dumps(parsed_res, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Schema generation error: {e}")
+        # Return a default schema
+        default_schema = {
+            "brand": {"type": "str", "desc": "Бренд товара"},
+            "model": {"type": "str", "desc": "Модель товара"},
+            "price": {"type": "int", "desc": "Цена"},
+            "condition": {"type": "str", "desc": "Состояние (новый/б/у)"},
+            "year": {"type": "int", "desc": "Год выпуска"}
+        }
+        return json.dumps(default_schema, ensure_ascii=False, indent=2)
+
+async def generate_sql_query(criteria: str, schema_json: str) -> str:
+    """Generate SQL query based on user criteria and extraction schema"""
+    try:
+        schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+        schema_fields = list(schema.keys())
+    except:
+        schema_fields = ["brand", "model", "price", "condition"]
+
+    prompt = f"""Создай SQL-запрос для фильтрации товаров в базе данных SQLite.
+КРИТЕРИИ ПОЛЬЗОВАТЕЛЯ: {criteria}
+ДОСТУПНЫЕ ПОЛЯ В СХЕМЕ: {', '.join(schema_fields)}
+
+ИНСТРУКЦИЯ:
+- Запрос должен использовать таблицу 'item' с полем 'structured_data' (хранит JSON)
+- Используй json_extract для извлечения значений из JSON
+- Пример: json_extract(structured_data, '$.field_name')
+- Фильтруй по критериям пользователя
+- Сортируй по релевантности или цене
+- Ограничь результат 20 лучшими вариантами
+- Верни ТОЛЬКО SQL-запрос без дополнительного текста."""
+
+    try:
+        response = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=400
+        )
+        sql_query = response.choices[0].message.content.strip()
+        # Clean up the response if it contains extra text
+        if "```" in sql_query:
+            sql_query = sql_query.split("```")[1].replace("sql", "").strip()
+        return sql_query
+    except Exception as e:
+        print(f"SQL generation error: {e}")
+        # Return a default query
+        return f"SELECT * FROM item WHERE json_extract(structured_data, '$.price') IS NOT NULL ORDER BY json_extract(structured_data, '$.price') ASC LIMIT 20;"
