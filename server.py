@@ -735,6 +735,10 @@ async def deep_research_chat(req: InterviewRequest):
             # Include schema proposal if provided in the response
             if interview_response.get("schema_proposal"):
                 response_data["schema_proposal"] = interview_response["schema_proposal"]
+                # Also save it to the session for later use in schema agreement
+                search_session.schema_json = interview_response["schema_proposal"]
+                session.add(search_session)
+                session.commit()
 
             return response_data
 

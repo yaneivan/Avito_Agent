@@ -1,3 +1,26 @@
-python -m uvicorn server:app --reload --port 8001 --log-level warning
+# Avito Agent
 
+Этот проект представляет собой агента для поиска и анализа товаров на Avito.
+
+## Запуск сервера
+
+Для запуска сервера выполните:
+
+```bash
+python -m uvicorn server:app --reload --port 8001 --log-level warning
+```
+
+## Запуск тестов
+
+Для запуска тестов выполните:
+
+```bash
 pytest -v
+```
+
+## Перезапуск сервера
+
+После внесения изменений в логику сервера (например, в промпты LLM) может потребоваться перезапуск сервера:
+
+- В Windows: запустите `restart_server.bat`
+- В Linux/macOS: запустите `restart_server.sh`
