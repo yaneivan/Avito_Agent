@@ -259,14 +259,12 @@ async def conduct_interview(history: list) -> dict:
 КРИТЕРИИ ЗАВЕРШЕНИЯ ИНТЕРВЬЮ:
 - Узнай бюджет (минимум диапазон или сумма)
 - Узнай целевую категорию товара (ноутбук, смартфон и т.д.)
-- Узнай основные характеристики (например, процессор, память, экран для ноутбука)
-- Узнай предпочтения по состоянию (новый/б/у)
-- Узнай предпочтения по брендам (если есть)
 
 ИНСТРУКЦИЯ:
 - Если в истории уже есть информация, удовлетворяющая критериям завершения, НЕ задавай повторные вопросы.
 - Если вся необходимая информация собрана, сообщи пользователю об этом и предложи перейти к следующему этапу.
 - Если информации недостаточно, задавай конкретные уточняющие вопросы.
+- Если пользователь дал базовую информацию (категория и бюджет), но не хочет уточнять детали, НЕ настаивай - переходи к следующему этапу.
 - В поле "reasoning" кратко опиши, вся ли необходимая информация собрана.
 - В поле "internal_thoughts" укажи, какие данные уже собраны и чего не хватает.
 - В поле "next_action" укажи: "continue_interview" если нужно больше информации, "propose_schema" если вся информация собрана.
@@ -274,7 +272,7 @@ async def conduct_interview(history: list) -> dict:
 
 ОТВЕТЬ ТОЛЬКО JSON:
 {{
-    "response": "текст ответа пользователю - краткое резюме собранных данных и предложение перейти к следующему этапу, если вся информация собрана, или уточняющий вопрос, если информации недостаточно",
+    "response": "текст ответа пользователю - краткое резюме собранных данных и предложение перейти к следующему этапу, если вся информация собрана, или уточняющий вопрос, если информации недостаточно. Будь естественным и не дави на пользователя.",
     "reasoning": "обоснование, вся ли информация собрана",
     "internal_thoughts": "какие данные уже собраны и чего не хватает",
     "next_action": "continue_interview | propose_schema",
@@ -408,10 +406,10 @@ async def generate_schema_proposal(criteria: str) -> dict:
             "next_action": "return_schema"
         }
 
-async def generate_sql_query(criteria: str, schema_json: str) -> dict:
+async def generate_sql_query(criteria: str, schema_agreed: str) -> dict:
     """Generate SQL query based on user criteria and extraction schema"""
     try:
-        schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+        schema = json.loads(schema_agreed) if isinstance(schema_agreed, str) else schema_agreed
         schema_fields = list(schema.keys())
     except:
         schema_fields = ["brand", "model", "price", "condition"]

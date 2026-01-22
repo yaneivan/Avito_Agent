@@ -8,8 +8,9 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select, desc
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+from datetime import datetime
 
-from database import create_db_and_tables, engine, SearchSession, ExtractionSchema, Item, SearchItemLink
+from database import create_db_and_tables, engine, SearchSession, ExtractionSchema, Item, SearchItemLink, ChatSession, ChatMessage
 from services import ProcessingService
 from image_utils import save_base64_image
 from llm_engine import decide_action, generate_schema_structure, conduct_interview, conduct_interview_basic, generate_schema_proposal, generate_sql_query
@@ -31,11 +32,11 @@ class InterviewRequest(BaseModel):
 
 class SchemaAgreementRequest(BaseModel):
     search_id: int
-    schema_json: str
+    agreed_schema: str
 
 class ChatSchemaAgreementRequest(BaseModel):
     search_id: int
-    schema_json: str
+    agreed_schema: str
     history: list
 
 class SqlGenerationRequest(BaseModel):
@@ -66,14 +67,51 @@ async def index(request: Request):
 async def deep_research(request: Request):
     return templates.TemplateResponse("deep_research.html", {"request": request})
 
+@app.get("/chat_history", response_class=HTMLResponse)
+async def chat_history(request: Request):
+    return templates.TemplateResponse("chat_history.html", {"request": request})
+
 @app.post("/api/agent/chat")
 async def agent_chat(req: ChatRequest):
     print(f"\n[API] Chat Request: {req.history[-1]['content']}")
+
     with Session(engine) as session:
+        # Create a new chat session for this interaction
+        chat_session = ChatSession(title=req.history[-1]['content'][:50] + "..." if len(req.history[-1]['content']) > 50 else req.history[-1]['content'])
+        session.add(chat_session)
+        session.commit()
+        session.refresh(chat_session)
+
+        # Add user message to the chat session
+        user_message = ChatMessage(
+            role="user",
+            content=req.history[-1]['content'],
+            message_type="user_request",
+            extra_metadata=json.dumps({"chat_type": "search"}),
+            chat_session_id=chat_session.id
+        )
+        session.add(user_message)
+        session.commit()
+
         schemas = session.exec(select(ExtractionSchema)).all()
         decision = await decide_action(req.history, [s.name for s in schemas])
-        
+
         if decision.get("action") == "chat":
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=decision.get("reply", ""),
+                message_type="chat_response",
+                extra_metadata=json.dumps({
+                    "reasoning": decision.get("reasoning", ""),
+                    "internal_thoughts": decision.get("internal_thoughts", ""),
+                    "plan": decision
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
             return {
                 "type": "chat",
                 "message": decision.get("reply"),
@@ -100,6 +138,23 @@ async def agent_chat(req: ChatRequest):
                     session.add(new_req); session.commit(); session.refresh(new_req)
                     for item in existing.items: session.add(SearchItemLink(search_id=new_req.id, item_id=item.id))
                     session.commit()
+
+                    # Add assistant response to the chat session
+                    assistant_message = ChatMessage(
+                        role="assistant",
+                        content="Найдено в кэше",
+                        message_type="search_response",
+                        extra_metadata=json.dumps({
+                            "reasoning": existing.reasoning,
+                            "internal_thoughts": existing.internal_thoughts,
+                            "task_id": new_req.id,
+                            "plan": decision
+                        }),
+                        chat_session_id=chat_session.id
+                    )
+                    session.add(assistant_message)
+                    session.commit()
+
                     return {
                         "type": "search",
                         "message": "Найдено в кэше",
@@ -128,6 +183,23 @@ async def agent_chat(req: ChatRequest):
             )
             session.add(task); session.commit(); session.refresh(task)
             print(f"[API] Created Task #{task.id}")
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=f"Запускаю поиск",
+                message_type="search_initiated",
+                extra_metadata=json.dumps({
+                    "reasoning": decision.get("reasoning", ""),
+                    "internal_thoughts": decision.get("internal_thoughts", ""),
+                    "task_id": task.id,
+                    "plan": decision
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
             return {
                 "type": "search",
                 "message": f"Запускаю поиск",
@@ -389,7 +461,7 @@ async def deep_research_interview(req: InterviewRequest):
 
                         # Update session stage to parsing
                         search_session.stage = "parsing"
-                        search_session.schema_json = schema_proposal
+                        search_session.schema_agreed = schema_proposal
 
                         session.add(search_session)
                         session.commit()
@@ -481,7 +553,11 @@ async def deep_research_schema_agreement(req: SchemaAgreementRequest):
             raise HTTPException(status_code=400, detail="Not a deep research session")
 
         # Update the agreed schema
-        search_session.schema_agreed = req.schema_json
+        # Ensure req.agreed_schema is a string
+        if isinstance(req.agreed_schema, dict):
+            search_session.schema_agreed = json.dumps(req.agreed_schema, ensure_ascii=False)
+        else:
+            search_session.schema_agreed = req.agreed_schema
         search_session.stage = "parsing"
         search_session.status = "pending"
 
@@ -492,13 +568,13 @@ async def deep_research_schema_agreement(req: SchemaAgreementRequest):
         ).first()
 
         if existing_schema:
-            existing_schema.structure_json = req.schema_json
+            existing_schema.structure_json = req.agreed_schema
             session.add(existing_schema)
         else:
             new_schema = ExtractionSchema(
                 name=schema_name,
                 description=f"Schema for deep research session {req.search_id}",
-                structure_json=req.schema_json
+                structure_json=req.agreed_schema
             )
             session.add(new_schema)
             session.commit()
@@ -628,6 +704,36 @@ async def deep_research_chat(req: InterviewRequest):
         else:
             search_session = existing_session
 
+        # Create a new chat session for this interaction if it doesn't exist
+        # Check if there's already a chat session associated with this search
+        chat_session = session.exec(
+            select(ChatSession).where(ChatSession.title.contains(str(search_session.id)))
+        ).first()
+
+        if not chat_session:
+            chat_session = ChatSession(title=f"Deep Research Chat - {search_session.id}")
+            session.add(chat_session)
+            session.commit()
+            session.refresh(chat_session)
+
+        # Add user message to the chat session
+        if req.history and len(req.history) > 0:
+            last_user_message = req.history[-1]
+            if last_user_message.get("role") == "user":
+                user_message = ChatMessage(
+                    role="user",
+                    content=last_user_message.get("content", ""),
+                    message_type="user_request",
+                    extra_metadata=json.dumps({
+                        "search_session_id": search_session.id,
+                        "stage": search_session.stage,
+                        "chat_type": "deep_research"
+                    }),
+                    chat_session_id=chat_session.id
+                )
+                session.add(user_message)
+                session.commit()
+
         # Process based on current stage
         if search_session.stage == "interview":
             # Conduct the interview using LLM
@@ -635,6 +741,21 @@ async def deep_research_chat(req: InterviewRequest):
                 interview_response = await conduct_interview(req.history)
             except ConnectionError:
                 # LLM is unavailable, return error message and stop the process
+                # Add assistant response to the chat session
+                assistant_message = ChatMessage(
+                    role="assistant",
+                    content="Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
+                    message_type="error_response",
+                    extra_metadata=json.dumps({
+                        "error": "llm_unavailable",
+                        "search_id": search_session.id,
+                        "stage": search_session.stage
+                    }),
+                    chat_session_id=chat_session.id
+                )
+                session.add(assistant_message)
+                session.commit()
+
                 return {
                     "type": "interview",
                     "message": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
@@ -700,9 +821,29 @@ async def deep_research_chat(req: InterviewRequest):
 
                             # Update session stage to parsing
                             search_session.stage = "parsing"
-                            search_session.schema_json = schema_proposal
+                            # Ensure schema_proposal is a string
+                            if isinstance(schema_proposal, dict):
+                                search_session.schema_agreed = json.dumps(schema_proposal, ensure_ascii=False)
+                            else:
+                                search_session.schema_agreed = schema_proposal
 
                             session.add(search_session)
+                            session.commit()
+
+                            # Add assistant response to the chat session
+                            assistant_message = ChatMessage(
+                                role="assistant",
+                                content="Схема подтверждена! Начинаю сбор данных...",
+                                message_type="schema_confirmed",
+                                extra_metadata=json.dumps({
+                                    "search_id": search_session.id,
+                                    "stage": search_session.stage,
+                                    "reasoning": schema_confirmation_result["reasoning"],
+                                    "internal_thoughts": schema_confirmation_result["internal_thoughts"]
+                                }),
+                                chat_session_id=chat_session.id
+                            )
+                            session.add(assistant_message)
                             session.commit()
 
                             return {
@@ -736,27 +877,185 @@ async def deep_research_chat(req: InterviewRequest):
             if interview_response.get("schema_proposal"):
                 response_data["schema_proposal"] = interview_response["schema_proposal"]
                 # Also save it to the session for later use in schema agreement
-                search_session.schema_json = interview_response["schema_proposal"]
+                # Ensure schema_proposal is a string
+                schema_proposal_value = interview_response["schema_proposal"]
+                if isinstance(schema_proposal_value, dict):
+                    search_session.schema_agreed = json.dumps(schema_proposal_value, ensure_ascii=False)
+                else:
+                    search_session.schema_agreed = schema_proposal_value
                 session.add(search_session)
                 session.commit()
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=response_data["message"],
+                message_type="interview_response",
+                extra_metadata=json.dumps({
+                    "search_id": search_session.id,
+                    "stage": search_session.stage,
+                    "reasoning": response_data["reasoning"],
+                    "internal_thoughts": response_data["internal_thoughts"],
+                    "needs_more_info": response_data["needs_more_info"],
+                    "schema_proposal": response_data.get("schema_proposal")
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
 
             return response_data
 
         elif search_session.stage == "schema_agreement":
             # Handle schema agreement
-            return await deep_research_schema_agreement(SchemaAgreementRequest(
+            result = await deep_research_schema_agreement(SchemaAgreementRequest(
                 search_id=search_session.id,
-                schema_json=search_session.schema_json or "{}"
+                agreed_schema=search_session.schema_agreed or "{}"
             ))
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=result.get("message", "Schema agreement processed"),
+                message_type="schema_agreement_response",
+                extra_metadata=json.dumps({
+                    "search_id": search_session.id,
+                    "result": result
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
+            return result
 
         elif search_session.stage == "parsing":
             # Handle parsing
-            return await deep_research_start_parsing(search_session.id)
+            result = await deep_research_start_parsing(search_session.id)
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=result.get("message", "Parsing started"),
+                message_type="parsing_response",
+                extra_metadata=json.dumps({
+                    "search_id": search_session.id,
+                    "result": result
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
+            return result
 
         elif search_session.stage == "analysis":
             # Handle analysis
-            return await deep_research_execute_analysis(search_session.id)
+            result = await deep_research_execute_analysis(search_session.id)
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=result.get("message", "Analysis completed"),
+                message_type="analysis_response",
+                extra_metadata=json.dumps({
+                    "search_id": search_session.id,
+                    "result": result
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
+            return result
 
         else:
             # Unknown stage
             raise HTTPException(status_code=400, detail=f"Unknown stage: {search_session.stage}")
+
+
+@app.get("/api/chats")
+def get_all_chats():
+    """Get all chat sessions"""
+    with Session(engine) as session:
+        chats = session.exec(select(ChatSession).order_by(desc(ChatSession.updated_at))).all()
+
+        result = []
+        for chat in chats:
+            # Получаем первые несколько сообщений для определения типа чата
+            messages = session.exec(
+                select(ChatMessage).where(ChatMessage.chat_session_id == chat.id).order_by(ChatMessage.timestamp).limit(5)
+            ).all()
+
+            result.append({
+                "id": chat.id,
+                "title": chat.title,
+                "created_at": chat.created_at,
+                "updated_at": chat.updated_at,
+                "messages": [{"id": msg.id, "role": msg.role, "content": msg.content, "timestamp": msg.timestamp, "message_type": msg.message_type, "extra_metadata": msg.extra_metadata} for msg in messages]
+            })
+        return result
+
+@app.get("/api/chats/{chat_id}")
+def get_chat_messages(chat_id: int):
+    """Get all messages for a specific chat session"""
+    with Session(engine) as session:
+        chat = session.get(ChatSession, chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+
+        messages = session.exec(
+            select(ChatMessage).where(ChatMessage.chat_session_id == chat_id).order_by(ChatMessage.timestamp)
+        ).all()
+
+        return {
+            "chat": {"id": chat.id, "title": chat.title, "created_at": chat.created_at, "updated_at": chat.updated_at},
+            "messages": [{"id": msg.id, "role": msg.role, "content": msg.content, "timestamp": msg.timestamp, "message_type": msg.message_type, "extra_metadata": msg.extra_metadata} for msg in messages]
+        }
+
+@app.post("/api/chats")
+def create_new_chat():
+    """Create a new chat session"""
+    with Session(engine) as session:
+        new_chat = ChatSession(title="Новый чат")
+        session.add(new_chat)
+        session.commit()
+        session.refresh(new_chat)
+        return {"id": new_chat.id, "title": new_chat.title, "created_at": new_chat.created_at, "updated_at": new_chat.updated_at}
+
+@app.post("/api/chats/{chat_id}/messages")
+def add_message_to_chat(chat_id: int, message: ChatMessage):
+    """Add a message to a specific chat session"""
+    with Session(engine) as session:
+        chat = session.get(ChatSession, chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+
+        # Update the chat session's updated_at timestamp
+        chat.updated_at = datetime.now()
+        session.add(chat)
+
+        # Add the new message
+        message.chat_session_id = chat_id
+        session.add(message)
+        session.commit()
+        session.refresh(message)
+
+        return {"id": message.id, "role": message.role, "content": message.content, "timestamp": message.timestamp, "message_type": message.message_type}
+
+@app.delete("/api/chats/{chat_id}")
+def delete_chat(chat_id: int):
+    """Delete a chat session and all its messages"""
+    with Session(engine) as session:
+        chat = session.get(ChatSession, chat_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+
+        session.delete(chat)
+        session.commit()
+        return {"message": "Chat session deleted successfully"}
+
+# Запуск сервера
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)

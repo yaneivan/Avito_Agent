@@ -13,10 +13,32 @@ class SearchItemLink(SQLModel, table=True):
 
 class ExtractionSchema(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str 
-    description: str 
-    structure_json: str 
+    name: str
+    description: str
+    structure_json: str
     searches: List["SearchSession"] = Relationship(back_populates="schema_model")
+
+class ChatSession(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(default="Новый чат")  # Title for the chat session
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    # Relationship to chat messages
+    messages: List["ChatMessage"] = Relationship(back_populates="chat_session", cascade_delete=True)
+
+class ChatMessage(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    role: str  # "user" or "assistant"
+    content: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+    # Type of message (optional, for categorizing different types of responses)
+    message_type: Optional[str] = None
+    # Reference to the chat session this message belongs to
+    chat_session_id: int = Field(foreign_key="chatsession.id")
+    chat_session: Optional[ChatSession] = Relationship(back_populates="messages")
+    # Additional metadata (optional)
+    extra_metadata: Optional[str] = None  # JSON string for additional data
 
 class SearchSession(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -46,14 +68,14 @@ class SearchSession(SQLModel, table=True):
 
 class Item(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    url: str = Field(unique=True, index=True) 
+    url: str = Field(unique=True, index=True)
     title: str
     price: str
     description: Optional[str] = None
     image_path: Optional[str] = None
-    raw_json: str 
-    structured_data: Optional[str] = None 
-    
+    raw_json: str
+    structured_data: Optional[str] = None
+
     searches: List[SearchSession] = Relationship(back_populates="items", link_model=SearchItemLink)
 
 sqlite_file_name = os.getenv("DATABASE_FILE_NAME", "database.db")

@@ -3,3 +3,5 @@
 database.db
 /images
 /tests/__pycache__
+QWEN.md
+qwen_tester/chat_history.json

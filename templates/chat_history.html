@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Avito Agent - История чатов{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #4CAF50; margin-bottom: 30px; text-align: center;">История чатов</h2>
+    
+    <div id="chat-history-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
+        <!-- Чаты будут загружены сюда -->
+    </div>
+    
+    <div id="no-chats-message" style="text-align: center; color: #888; margin-top: 50px; display: none;">
+        <p>У вас пока нет чатов</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Загрузка истории чатов
+    async function loadChatHistory() {
+        try {
+            const response = await fetch('/api/chats');
+            const chats = await response.json();
+            
+            const container = document.getElementById('chat-history-container');
+            const noChatsMessage = document.getElementById('no-chats-message');
+            
+            if (chats.length === 0) {
+                container.style.display = 'none';
+                noChatsMessage.style.display = 'block';
+                return;
+            }
+            
+            container.style.display = 'grid';
+            noChatsMessage.style.display = 'none';
+            
+            container.innerHTML = '';
+            
+            chats.forEach(chat => {
+                // Определяем тип чата по метаданным первого сообщения
+                let chatType = 'Неизвестный';
+                let chatTypeColor = '#666';
+
+                // Получаем первый элемент массива messages, если он существует
+                const firstMessage = chat.messages && chat.messages.length > 0 ? chat.messages[0] : null;
+                if (firstMessage && firstMessage.extra_metadata) {
+                    try {
+                        const metadata = JSON.parse(firstMessage.extra_metadata);
+                        if (metadata.chat_type === 'deep_research') {
+                            chatType = 'Глубокое исследование';
+                            chatTypeColor = '#2196F3';
+                        } else if (metadata.chat_type === 'search') {
+                            chatType = 'Поиск товаров';
+                            chatTypeColor = '#4CAF50';
+                        }
+                    } catch (e) {
+                        // Если не удалось распарсить JSON, определяем по содержимому заголовка
+                        if (chat.title.toLowerCase().includes('глубок') || chat.title.toLowerCase().includes('анализ')) {
+                            chatType = 'Глубокое исследование';
+                            chatTypeColor = '#2196F3';
+                        } else {
+                            chatType = 'Поиск товаров';
+                            chatTypeColor = '#4CAF50';
+                        }
+                    }
+                } else {
+                    // Если нет метаданных, определяем по содержимому заголовка
+                    if (chat.title.toLowerCase().includes('глубок') || chat.title.toLowerCase().includes('анализ')) {
+                        chatType = 'Глубокое исследование';
+                        chatTypeColor = '#2196F3';
+                    } else {
+                        chatType = 'Поиск товаров';
+                        chatTypeColor = '#4CAF50';
+                    }
+                }
+                
+                const chatCard = document.createElement('div');
+                chatCard.className = 'chat-card';
+                chatCard.style.cssText = `
+                    background: #1e1e1e;
+                    border: 1px solid #333;
+                    border-radius: 8px;
+                    padding: 15px;
+                    cursor: pointer;
+                    transition: transform 0.2s, border-color 0.2s;
+                `;
+                
+                chatCard.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h5 style="color: #e0e0e0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${chat.title}</h5>
+                        <span style="background: ${chatTypeColor}; color: white; padding: 3px 8px; border-radius: 12px; font-size: 0.8em;">${chatType}</span>
+                    </div>
+                    <div style="font-size: 0.85em; color: #aaa; margin-bottom: 10px;">
+                        Создан: ${new Date(chat.created_at).toLocaleString()}
+                    </div>
+                    <div style="font-size: 0.85em; color: #aaa;">
+                        Обновлен: ${new Date(chat.updated_at).toLocaleString()}
+                    </div>
+                `;
+                
+                chatCard.addEventListener('click', () => {
+                    // Переход к чату в зависимости от типа
+                    if (chatType === 'Глубокое исследование') {
+                        window.location.href = `/deep_research?chat_id=${chat.id}`;
+                    } else {
+                        window.location.href = `/?chat_id=${chat.id}`;
+                    }
+                });
+                
+                container.appendChild(chatCard);
+            });
+        } catch (error) {
+            console.error('Ошибка загрузки истории чатов:', error);
+            document.getElementById('chat-history-container').innerHTML = '<div style="color: #ff6b6b; text-align: center;">Ошибка загрузки истории чатов</div>';
+        }
+    }
+    
+    // Загружаем историю чатов при загрузке страницы
+    window.onload = function() {
+        loadChatHistory();
+    };
+</script>
+{% endblock %}
