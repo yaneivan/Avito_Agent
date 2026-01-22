@@ -1,9 +1,10 @@
 import os, json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select, desc
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -37,6 +38,7 @@ class SqlGenerationRequest(BaseModel):
     criteria: str
 
 service = ProcessingService()
+templates = Jinja2Templates(directory="templates")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,10 +52,14 @@ app.mount("/images", StaticFiles(directory="images"), name="images")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/", response_class=HTMLResponse)
-async def index(): return FileResponse("templates/index.html")
+async def index(request: Request):
+    with Session(engine) as session:
+        schemas = session.exec(select(ExtractionSchema)).all()
+    return templates.TemplateResponse("index.html", {"request": request, "schemas": schemas})
 
 @app.get("/deep_research", response_class=HTMLResponse)
-async def deep_research(): return FileResponse("templates/deep_research.html")
+async def deep_research(request: Request):
+    return templates.TemplateResponse("deep_research.html", {"request": request})
 
 @app.post("/api/agent/chat")
 async def agent_chat(req: ChatRequest):
