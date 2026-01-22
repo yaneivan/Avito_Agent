@@ -10,7 +10,10 @@
 
     <!-- Interview Stage -->
     <div id="interview-stage" class="chat-container" style="flex: 1; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-        <div class="chat-header" style="padding: 15px 20px; background: #222; border-bottom: 1px solid #333; font-weight: bold;">Интервью - Сбор требований</div>
+        <div class="chat-header" style="padding: 15px 20px; background: #222; border-bottom: 1px solid #333; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
+            <span>Интервью - Сбор требований</span>
+            <div id="current-state" style="font-size: 0.8em; color: #aaa;">Стадия: интервью</div>
+        </div>
         <div id="chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px;">
             <div class="msg msg-bot" style="padding: 12px 16px; border-radius: 8px; max-width: 80%; font-size: 0.95rem; line-height: 1.5; word-wrap: break-word; background: #262626; align-self: flex-start; border-left: 3px solid #4CAF50; border-bottom-left-radius: 2px;">Привет! Я помогу вам провести глубокий анализ рынка. Отвечайте на мои вопросы, чтобы я мог лучше понять ваши потребности.</div>
         </div>
@@ -70,9 +73,10 @@
     const parsedCountSpan = document.getElementById('parsed-count');
     const analysisSummary = document.getElementById('analysis-summary');
     const topItemsGrid = document.getElementById('top-items-grid');
+    const currentStateElement = document.getElementById('current-state');
 
     // Add message to chat
-    function addMsg(role, text, isHtml = false) {
+    function addMsg(role, text, isHtml = false, reasoning = '', internalThoughts = '', nextAction = '') {
         const div = document.createElement('div');
         div.className = `msg msg-${role}`;
         div.style.cssText = `
@@ -106,6 +110,62 @@
             div.innerText = text;
         }
 
+        // Add expandable reasoning and internal thoughts sections for bot messages
+        if (role === 'bot' && (reasoning || internalThoughts || nextAction)) {
+            const expandDiv = document.createElement('div');
+            expandDiv.style.cssText = `
+                margin-top: 8px;
+                padding: 8px;
+                background: #2a2a2a;
+                border-radius: 4px;
+                border-left: 2px solid #666;
+            `;
+
+            // Reasoning section
+            if (reasoning) {
+                const reasoningHeader = document.createElement('div');
+                reasoningHeader.innerHTML = `
+                    <strong style="color: #aaa; font-size: 0.8em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                        🔍 Обоснование решения (кликните, чтобы развернуть)
+                    </strong>
+                    <div style="display: none; margin-top: 5px; color: #bbb; font-size: 0.85em; padding: 5px; background: #333; border-radius: 3px;">
+                        ${reasoning}
+                    </div>
+                `;
+                expandDiv.appendChild(reasoningHeader);
+            }
+
+            // Internal thoughts section
+            if (internalThoughts) {
+                const thoughtsHeader = document.createElement('div');
+                thoughtsHeader.innerHTML = `
+                    <strong style="color: #aaa; font-size: 0.8em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                        💭 Внутренние размышления (кликните, чтобы развернуть)
+                    </strong>
+                    <div style="display: none; margin-top: 5px; color: #bbb; font-size: 0.85em; padding: 5px; background: #333; border-radius: 3px;">
+                        ${internalThoughts}
+                    </div>
+                `;
+                expandDiv.appendChild(thoughtsHeader);
+            }
+
+            // Next action section
+            if (nextAction) {
+                const actionHeader = document.createElement('div');
+                actionHeader.innerHTML = `
+                    <strong style="color: #aaa; font-size: 0.8em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                        🔄 Следующее действие (кликните, чтобы развернуть)
+                    </strong>
+                    <div style="display: none; margin-top: 5px; color: #bbb; font-size: 0.85em; padding: 5px; background: #333; border-radius: 3px;">
+                        ${nextAction}
+                    </div>
+                `;
+                expandDiv.appendChild(actionHeader);
+            }
+
+            div.appendChild(expandDiv);
+        }
+
         chatMessages.appendChild(div);
         chatMessages.scrollTop = chatMessages.scrollHeight;
         return div;
@@ -122,6 +182,17 @@
 
         // Show current stage
         document.getElementById(`${stage}-stage`).classList.remove('hidden');
+
+        // Update current state display
+        const stageNames = {
+            'interview': 'интервью',
+            'parsing': 'сбор данных',
+            'results': 'анализ результатов'
+        };
+
+        if (currentStateElement) {
+            currentStateElement.textContent = `Стадия: ${stageNames[stage] || stage}`;
+        }
     }
 
     // Send message handler
@@ -178,7 +249,7 @@
                 }
             }
 
-            const res = await fetch('/api/deep_research/interview', {
+            const res = await fetch('/api/deep_research/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -188,8 +259,8 @@
             const data = await res.json();
 
             if (data.type === 'interview') {
-                // Add bot response
-                addMsg('assistant', marked.parse(data.message), true);
+                // Add bot response with reasoning, internal thoughts and next action
+                addMsg('assistant', marked.parse(data.message), true, data.reasoning, data.internal_thoughts, data.next_action || '');
                 deepHistory.push({role: "assistant", content: data.message});
 
                 // Store search ID
@@ -226,12 +297,12 @@
 
                         schemaExplanation += "\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'. Если нужно что-то изменить - напишите об этом.";
 
-                        // Add the schema explanation to the chat
-                        addMsg('assistant', marked.parse(schemaExplanation), true);
+                        // Add the schema explanation to the chat with reasoning, internal thoughts and next action
+                        addMsg('assistant', marked.parse(schemaExplanation), true, data.reasoning, data.internal_thoughts, data.next_action || '');
                     } catch (parseErr) {
                         console.error("Error parsing schema:", parseErr);
                         // If parsing fails, just show the raw JSON
-                        addMsg('assistant', `📋 Предлагаемая схема (в формате JSON):\n\`\`\`json\n${data.schema_proposal}\n\`\`\`\n\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'.`);
+                        addMsg('assistant', `📋 Предлагаемая схема (в формате JSON):\n\`\`\`json\n${data.schema_proposal}\n\`\`\`\n\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'.`, false, data.reasoning, data.internal_thoughts, data.next_action || '');
                     }
                 }
 
@@ -247,13 +318,13 @@
                     sendBtn.disabled = true;
                     finishInterviewBtn.disabled = true;
 
-                    // Show error message
-                    addMsg('assistant', `❌ ${data.error}`);
+                    // Show error message with reasoning, internal thoughts and next action
+                    addMsg('assistant', `❌ ${data.error}`, false, data.reasoning, data.internal_thoughts, data.next_action || '');
                 }
             }
             else if (data.type === 'schema_confirmed') {
-                // Handle schema confirmation
-                addMsg('assistant', marked.parse(data.message), true);
+                // Handle schema confirmation with reasoning, internal thoughts and next action
+                addMsg('assistant', marked.parse(data.message), true, data.reasoning, data.internal_thoughts, data.next_action || '');
 
                 // Update search ID if needed
                 if (data.search_id) {
@@ -268,7 +339,7 @@
             }
         } catch (err) {
             console.error(err);
-            addMsg('assistant', '❌ Ошибка связи с сервером');
+            addMsg('assistant', '❌ Ошибка связи с сервером', false, 'Ошибка подключения к серверу', 'Произошла ошибка при попытке соединения с сервером', 'retry_connection');
         }
 
         inp.disabled = false;
@@ -302,7 +373,7 @@
 
         // Send the message to the server to continue the interview process
         try {
-            const res = await fetch('/api/deep_research/interview', {
+            const res = await fetch('/api/deep_research/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -312,8 +383,8 @@
             const data = await res.json();
 
             if (data.type === 'interview') {
-                // Add bot response
-                addMsg('assistant', marked.parse(data.message), true);
+                // Add bot response with reasoning, internal thoughts and next action
+                addMsg('assistant', marked.parse(data.message), true, data.reasoning, data.internal_thoughts, data.next_action || '');
                 deepHistory.push({role: "assistant", content: data.message});
 
                 // Store search ID
@@ -350,18 +421,18 @@
 
                         schemaExplanation += "\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'. Если нужно что-то изменить - напишите об этом.";
 
-                        // Add the schema explanation to the chat
-                        addMsg('assistant', marked.parse(schemaExplanation), true);
+                        // Add the schema explanation to the chat with reasoning, internal thoughts and next action
+                        addMsg('assistant', marked.parse(schemaExplanation), true, data.reasoning, data.internal_thoughts, data.next_action || '');
                     } catch (parseErr) {
                         console.error("Error parsing schema:", parseErr);
                         // If parsing fails, just show the raw JSON
-                        addMsg('assistant', `📋 Предлагаемая схема (в формате JSON):\n\`\`\`json\n${data.schema_proposal}\n\`\`\`\n\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'.`);
+                        addMsg('assistant', `📋 Предлагаемая схема (в формате JSON):\n\`\`\`json\n${data.schema_proposal}\n\`\`\`\n\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'.`, false, data.reasoning, data.internal_thoughts, data.next_action || '');
                     }
                 }
             }
         } catch (err) {
             console.error(err);
-            addMsg('assistant', '❌ Ошибка связи с сервером');
+            addMsg('assistant', '❌ Ошибка связи с сервером', false, 'Ошибка подключения к серверу', 'Произошла ошибка при попытке соединения с сервером', 'retry_connection');
         }
     });
 
@@ -454,12 +525,44 @@
             const data = await res.json();
 
             if (data.status === 'completed') {
-                // Get the search session to retrieve the summary
+                // Get the search session to retrieve the summary and reasoning
                 const sessionRes = await fetch(`/api/searches/${deepSearchId}/status`);
                 const sessionData = await sessionRes.json();
 
                 if (sessionData.summary) {
-                    analysisSummary.innerHTML = marked.parse(sessionData.summary);
+                    // Create detailed analysis view with reasoning and internal thoughts
+                    let detailedAnalysis = marked.parse(sessionData.summary);
+
+                    // Add reasoning and internal thoughts if available
+                    if (sessionData.reasoning || sessionData.internal_thoughts) {
+                        detailedAnalysis += `
+                            <div style="margin-top: 20px; padding: 15px; background: #2a2a2a; border-radius: 8px; border-left: 3px solid #666;">
+                                <h4 style="color: #ccc; margin-top: 0;">Дополнительная информация:</h4>
+
+                                ${sessionData.reasoning ? `
+                                <div style="margin-bottom: 15px;">
+                                    <strong style="color: #aaa; font-size: 0.9em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                                        🔍 Обоснование решения (кликните, чтобы развернуть)
+                                    </strong>
+                                    <div style="display: none; margin-top: 5px; color: #bbb; font-size: 0.85em; padding: 10px; background: #333; border-radius: 4px;">
+                                        ${sessionData.reasoning}
+                                    </div>
+                                </div>` : ''}
+
+                                ${sessionData.internal_thoughts ? `
+                                <div style="margin-bottom: 15px;">
+                                    <strong style="color: #aaa; font-size: 0.9em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                                        💭 Внутренние размышления (кликните, чтобы развернуть)
+                                    </strong>
+                                    <div style="display: none; margin-top: 5px; color: #bbb; font-size: 0.85em; padding: 10px; background: #333; border-radius: 4px;">
+                                        ${sessionData.internal_thoughts}
+                                    </div>
+                                </div>` : ''}
+                            </div>
+                        `;
+                    }
+
+                    analysisSummary.innerHTML = detailedAnalysis;
                 } else {
                     analysisSummary.innerHTML = '<p>Результаты анализа будут доступны позже.</p>';
                 }
@@ -496,6 +599,34 @@
                 } catch(e) {}
             }
 
+            // Добавляем рассуждения и внутренние мысли, если они есть
+            let reasoningHtml = '';
+            if (item.reasoning || item.internal_thoughts) {
+                reasoningHtml = `
+                    <div style="margin-top: 8px; padding: 8px; background: #2a2a2a; border-radius: 4px; border-left: 2px solid #666;">
+                        ${item.reasoning ? `
+                        <div style="margin-bottom: 5px;">
+                            <strong style="color: #aaa; font-size: 0.75em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                                🔍 Обоснование (кликните, чтобы развернуть)
+                            </strong>
+                            <div style="display: none; margin-top: 3px; color: #bbb; font-size: 0.75em; padding: 5px; background: #333; border-radius: 3px;">
+                                \${item.reasoning}
+                            </div>
+                        </div>` : ''}
+
+                        ${item.internal_thoughts ? `
+                        <div style="margin-bottom: 5px;">
+                            <strong style="color: #aaa; font-size: 0.75em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+                                💭 Размышления (кликните, чтобы развернуть)
+                            </strong>
+                            <div style="display: none; margin-top: 3px; color: #bbb; font-size: 0.75em; padding: 5px; background: #333; border-radius: 3px;">
+                                \${item.internal_thoughts}
+                            </div>
+                        </div>` : ''}
+                    </div>
+                `;
+            }
+
             return `
             <div class="card" style="background: #1e1e1e; border: 1px solid #333; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.2s;">
                 <img src="\${item.image_url || 'https://via.placeholder.com/200x140?text=No+Photo'}" style="width: 100%; height: 140px; object-fit: cover; background: #252525;">
@@ -503,6 +634,7 @@
                     <div class="price" style="color: #4CAF50; font-weight: bold; font-size: 1.1rem; margin-bottom: 5px;">\${item.price}</div>
                     <div class="title" style="color: #e0e0e0; text-decoration: none; font-size: 0.9rem; font-weight: 500; display: block; line-height: 1.3; margin-bottom: 8px;"><a href="\${item.url}" target="_blank" style="color: #e0e0e0; text-decoration: none;">\${item.title}</a></div>
                     <div class="specs" style="font-size: 0.75rem; color: #888; margin-top: auto; border-top: 1px solid #333; padding-top: 8px;">\${specsHtml}</div>
+                    \${reasoningHtml}
                 </div>
             </div>
             `;

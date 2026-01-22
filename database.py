@@ -33,6 +33,8 @@ class SearchSession(SQLModel, table=True):
 
     # Результат анализа (ответ чата)
     summary: Optional[str] = None # <-- НОВОЕ ПОЛЕ
+    reasoning: Optional[str] = None  # Объяснение решения LLM
+    internal_thoughts: Optional[str] = None  # Внутренние размышления LLM
     interview_data: Optional[str] = None  # JSON string storing interview responses
     schema_agreed: Optional[str] = None  # JSON string storing agreed schema
     analysis_result: Optional[str] = None  # Analysis result for deep research

@@ -85,9 +85,19 @@ class ProcessingService:
                 if processed_items_for_summary:
                     if is_deep_analysis:
                         # For deep analysis, we might want to use a different summarization approach
-                        summary_text = await self.summarize_deep_analysis(search_request, processed_items_for_summary)
+                        summary_result = await self.summarize_deep_analysis(search_request, processed_items_for_summary)
+                        summary_text = summary_result.get("summary", "Нет данных для отображения")
+
+                        # Сохраняем рассуждения и внутренние мысли в базе данных
+                        search_request.reasoning = summary_result.get("reasoning", "")
+                        search_request.internal_thoughts = summary_result.get("internal_thoughts", "")
                     else:
-                        summary_text = await summarize_search_results(search_request.query_text, processed_items_for_summary)
+                        summary_result = await summarize_search_results(search_request.query_text, processed_items_for_summary)
+                        summary_text = summary_result.get("summary", "Нет данных для отображения")
+
+                        # Сохраняем рассуждения и внутренние мысли в базе данных
+                        search_request.reasoning = summary_result.get("reasoning", "")
+                        search_request.internal_thoughts = summary_result.get("internal_thoughts", "")
                 else:
                     summary_text = "Товары не найдены или возникла ошибка при сборе."
             except Exception as e:
@@ -110,10 +120,15 @@ class ProcessingService:
             session.commit()
             print(f"[DEBUG SERVICE] Task #{task_id} marked as DONE.")
 
-    async def summarize_deep_analysis(self, search_request: SearchSession, items: list) -> str:
+    async def summarize_deep_analysis(self, search_request: SearchSession, items: list) -> dict:
         """Generate a summary for deep analysis with SQL filtering"""
         if not items:
-            return "Глубокий анализ: не найдено подходящих товаров."
+            return {
+                "summary": "Глубокий анализ: не найдено подходящих товаров.",
+                "reasoning": "Нет данных для анализа",
+                "internal_thoughts": "Нет результатов поиска для создания отчета",
+                "next_action": "inform_no_results"
+            }
 
         # For deep analysis, we might want to apply SQL filters based on interview data
         # This is a simplified version - in a real implementation, we would execute the SQL query
@@ -152,7 +167,20 @@ class ProcessingService:
 3. **Рекомендации** (лучшие варианты с обоснованием).
 4. **Риски** (потенциальные проблемы).
 
-Будь краток, не пиши приветствий. Максимум 200-250 слов."""
+Будь краток, не пиши приветствий. Максимум 200-250 слов.
+
+ИНСТРУКЦИЯ:
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "present_results", "request_feedback", "suggest_next_steps".
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "summary": "аналитический отчет",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "present_results | request_feedback | suggest_next_steps"
+}}"""
 
         try:
             from llm_engine import client, MODEL_NAME
@@ -162,8 +190,16 @@ class ProcessingService:
                 model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=1200
+                max_tokens=1400
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if "```" in content:
+                content = content.split("```")[1].replace("json", "").strip()
+            return json.loads(content)
         except Exception as e:
-            return f"Ошибка при создании отчета глубокого анализа: {e}"
+            return {
+                "summary": f"Ошибка при создании отчета глубокого анализа: {e}",
+                "reasoning": "Ошибка при создании отчета",
+                "internal_thoughts": f"Произошла ошибка при создании отчета: {e}",
+                "next_action": "inform_error"
+            }

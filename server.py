@@ -74,30 +74,68 @@ async def agent_chat(req: ChatRequest):
         decision = await decide_action(req.history, [s.name for s in schemas])
         
         if decision.get("action") == "chat":
-            return {"type": "chat", "message": decision.get("reply"), "plan": decision}
-            
+            return {
+                "type": "chat",
+                "message": decision.get("reply"),
+                "plan": decision,
+                "reasoning": decision.get("reasoning", ""),
+                "internal_thoughts": decision.get("internal_thoughts", "")
+            }
+
         elif decision.get("action") == "search":
             query = decision.get("search_query") or "Товар"
             if req.use_cache:
                 existing = session.exec(select(SearchSession).where(SearchSession.query_text == query, SearchSession.status == "done", SearchSession.summary != None).order_by(desc(SearchSession.created_at))).first()
                 if existing:
-                    new_req = SearchSession(query_text=query, schema_id=existing.schema_id, status="done", open_in_browser=False, use_cache=True, summary=existing.summary)
+                    new_req = SearchSession(
+                        query_text=query,
+                        schema_id=existing.schema_id,
+                        status="done",
+                        open_in_browser=False,
+                        use_cache=True,
+                        summary=existing.summary,
+                        reasoning=existing.reasoning,
+                        internal_thoughts=existing.internal_thoughts
+                    )
                     session.add(new_req); session.commit(); session.refresh(new_req)
                     for item in existing.items: session.add(SearchItemLink(search_id=new_req.id, item_id=item.id))
                     session.commit()
-                    return {"type": "search", "message": "Найдено в кэше", "task_id": new_req.id, "plan": decision}
+                    return {
+                        "type": "search",
+                        "message": "Найдено в кэше",
+                        "task_id": new_req.id,
+                        "plan": decision,
+                        "reasoning": existing.reasoning,
+                        "internal_thoughts": existing.internal_thoughts
+                    }
 
             schema_name = decision.get("schema_name") or "General"
             target_schema = next((s for s in schemas if s.name.lower() == schema_name.lower()), None)
             if not target_schema:
-                new_struct = await generate_schema_structure(schema_name)
+                new_struct_result = await generate_schema_structure(schema_name)
+                new_struct = new_struct_result["schema"]
                 target_schema = ExtractionSchema(name=schema_name, description="Auto", structure_json=new_struct)
                 session.add(target_schema); session.commit(); session.refresh(target_schema)
-            
-            task = SearchSession(query_text=query, schema_id=target_schema.id, limit_count=decision.get("limit", 5), status="pending", open_in_browser=req.open_browser)
+
+            task = SearchSession(
+                query_text=query,
+                schema_id=target_schema.id,
+                limit_count=decision.get("limit", 5),
+                status="pending",
+                open_in_browser=req.open_browser,
+                reasoning=decision.get("reasoning", ""),
+                internal_thoughts=decision.get("internal_thoughts", "")
+            )
             session.add(task); session.commit(); session.refresh(task)
             print(f"[API] Created Task #{task.id}")
-            return {"type": "search", "message": f"Запускаю поиск", "task_id": task.id, "plan": decision}
+            return {
+                "type": "search",
+                "message": f"Запускаю поиск",
+                "task_id": task.id,
+                "plan": decision,
+                "reasoning": decision.get("reasoning", ""),
+                "internal_thoughts": decision.get("internal_thoughts", "")
+            }
     return {"type": "error", "message": "Ошибка"}
 
 @app.get("/api/searches/{search_id}/status")
@@ -105,7 +143,15 @@ def get_search_status(search_id: int):
     with Session(engine) as session:
         req = session.get(SearchSession, search_id)
         # УБРАЛ ЛИШНИЕ ПРИНТЫ
-        return {"status": req.status if req else "not_found", "summary": req.summary if req else None}
+        if req:
+            return {
+                "status": req.status,
+                "summary": req.summary,
+                "reasoning": req.reasoning,
+                "internal_thoughts": req.internal_thoughts
+            }
+        else:
+            return {"status": "not_found", "summary": None, "reasoning": None, "internal_thoughts": None}
 
 @app.get("/api/get_task")
 def get_task():
@@ -115,7 +161,14 @@ def get_task():
             task.status = "processing"
             session.add(task); session.commit()
             print(f"[API] Task #{task.id} picked up")
-            return {"task_id": task.id, "query": task.query_text, "active_tab": task.open_in_browser, "limit": task.limit_count}
+            return {
+                "task_id": task.id,
+                "query": task.query_text,
+                "active_tab": task.open_in_browser,
+                "limit": task.limit_count,
+                "reasoning": task.reasoning,
+                "internal_thoughts": task.internal_thoughts
+            }
     return {"task_id": None}
 
 @app.post("/api/submit_results")
@@ -125,17 +178,56 @@ async def submit_results(data: SubmitData):
     for idx, item in enumerate(data.items):
         path = save_base64_image(item.image_base64, data.task_id, idx, item.url)
         item.local_path = path; item.image_base64 = None; processed.append(item)
+
+    # Получаем сессию поиска для получения рассуждений
+    with Session(engine) as session:
+        search_session = session.get(SearchSession, data.task_id)
+        reasoning = search_session.reasoning if search_session else None
+        internal_thoughts = search_session.internal_thoughts if search_session else None
+
     await service.process_incoming_data(data.task_id, processed)
-    return {"status": "ok"}
+
+    return {
+        "status": "ok",
+        "reasoning": reasoning,
+        "internal_thoughts": internal_thoughts
+    }
 
 @app.get("/api/schemas")
 def get_schemas():
-    with Session(engine) as session: return session.exec(select(ExtractionSchema)).all()
+    with Session(engine) as session:
+        schemas = session.exec(select(ExtractionSchema)).all()
+        # Возвращаем схемы с дополнительной информацией о последних сессиях
+        result = []
+        for schema in schemas:
+            # Получаем последнюю сессию, связанную с этой схемой
+            last_session = session.exec(
+                select(SearchSession)
+                .where(SearchSession.schema_id == schema.id)
+                .order_by(desc(SearchSession.created_at))
+                .limit(1)
+            ).first()
+
+            schema_dict = schema.model_dump()
+            if last_session:
+                schema_dict["last_reasoning"] = last_session.reasoning
+                schema_dict["last_internal_thoughts"] = last_session.internal_thoughts
+            else:
+                schema_dict["last_reasoning"] = None
+                schema_dict["last_internal_thoughts"] = None
+
+            result.append(schema_dict)
+        return result
 
 @app.get("/api/searches/{search_id}/items")
 def get_search_items(search_id: int):
     with Session(engine) as session:
+        # Получаем товары, связанные с сессией поиска
         items = session.exec(select(Item).join(SearchItemLink).where(SearchItemLink.search_id == search_id)).all()
+
+        # Получаем сессию поиска для получения рассуждений
+        search_session = session.get(SearchSession, search_id)
+
         res = []
         for i in items:
             d = i.model_dump()
@@ -143,13 +235,31 @@ def get_search_items(search_id: int):
                 p = i.image_path.replace('\\', '/')
                 rel = p.split('images/')[-1] if 'images/' in p else p
                 d["image_url"] = f"/images/{rel}"
+
+            # Добавляем рассуждения и внутренние мысли из сессии поиска (если доступны)
+            # В реальной реализации, каждому товару могут быть присвоены свои рассуждения
+            # Но в текущей структуре данных они хранятся на уровне сессии
+            if search_session:
+                d["reasoning"] = search_session.reasoning
+                d["internal_thoughts"] = search_session.internal_thoughts
+
             res.append(d)
         return res
 
 @app.post("/api/log")
-def remote_log(log: LogMessage): return {"status": "ok"}
+def remote_log(log: LogMessage):
+    # В зависимости от типа лога, можем возвращать различные данные
+    if log.level == "debug_detailed":
+        # Возвращаем информацию о рассуждениях и внутренних мыслях
+        return {
+            "status": "ok",
+            "reasoning": "Лог получен и обработан",
+            "internal_thoughts": f"Обработка лога от {log.source} уровня {log.level}: {log.message}"
+        }
+    else:
+        return {"status": "ok"}
 
-def detect_schema_confirmation(user_input: str) -> bool:
+def detect_schema_confirmation(user_input: str) -> dict:
     """Detect if user is confirming the schema in natural language"""
     user_input_lower = user_input.lower().strip()
 
@@ -168,7 +278,14 @@ def detect_schema_confirmation(user_input: str) -> bool:
 
     modification_found = any(keyword in user_input_lower for keyword in modification_keywords)
 
-    return confirmation_found and not modification_found
+    result = confirmation_found and not modification_found
+
+    # Возвращаем результат с объяснением
+    return {
+        "result": result,
+        "reasoning": f"Подтверждение найдено: {confirmation_found}, Изменение найдено: {modification_found}",
+        "internal_thoughts": f"Анализирую ввод пользователя '{user_input}' на предмет подтверждения схемы. Подходящие ключевые слова: {confirmation_found}, Ключевые слова на изменение: {modification_found}"
+    }
 
 @app.post("/api/deep_research/interview")
 async def deep_research_interview(req: InterviewRequest):
@@ -229,7 +346,9 @@ async def deep_research_interview(req: InterviewRequest):
         interview_data[len(interview_data)] = {
             "question": req.history[-1]['content'] if req.history else "",
             "response": interview_response.get("response", ""),
-            "needs_more_info": interview_response.get("needs_more_info", True)
+            "needs_more_info": interview_response.get("needs_more_info", True),
+            "reasoning": interview_response.get("reasoning", ""),
+            "internal_thoughts": interview_response.get("internal_thoughts", "")
         }
 
         search_session.interview_data = json.dumps(interview_data, ensure_ascii=False)
@@ -241,7 +360,8 @@ async def deep_research_interview(req: InterviewRequest):
                 user_input = last_user_message.get("content", "")
 
                 # Detect if user is confirming schema
-                if detect_schema_confirmation(user_input):
+                schema_confirmation_result = detect_schema_confirmation(user_input)
+                if schema_confirmation_result["result"]:
                     # If we're in schema agreement stage, finalize it
                     if search_session.stage == "schema_agreement":
                         # Use the schema proposal from the last interview response if available
@@ -264,7 +384,8 @@ async def deep_research_interview(req: InterviewRequest):
                                     criteria_summary = "Пользователь хочет купить товар"
 
                             # Generate schema proposal
-                            schema_proposal = await generate_schema_proposal(criteria_summary)
+                            schema_proposal_result = await generate_schema_proposal(criteria_summary)
+                            schema_proposal = schema_proposal_result["schema"]
 
                         # Update session stage to parsing
                         search_session.stage = "parsing"
@@ -277,7 +398,9 @@ async def deep_research_interview(req: InterviewRequest):
                             "type": "schema_confirmed",
                             "message": "Схема подтверждена! Начинаю сбор данных...",
                             "search_id": search_session.id,
-                            "stage": search_session.stage
+                            "stage": search_session.stage,
+                            "reasoning": schema_confirmation_result["reasoning"],
+                            "internal_thoughts": schema_confirmation_result["internal_thoughts"]
                         }
 
         # Move to next stage if enough info gathered
@@ -291,6 +414,8 @@ async def deep_research_interview(req: InterviewRequest):
         response_data = {
             "type": "interview",
             "message": interview_response.get("response", ""),
+            "reasoning": interview_response.get("reasoning", ""),
+            "internal_thoughts": interview_response.get("internal_thoughts", ""),
             "needs_more_info": interview_response.get("needs_more_info", True),
             "search_id": search_session.id,
             "stage": search_session.stage
@@ -328,10 +453,19 @@ async def deep_research_generate_schema_proposal(search_id: int):
             except:
                 criteria_summary = "Пользователь хочет купить товар"
 
-        schema_proposal = await generate_schema_proposal(criteria_summary)
+        schema_proposal_result = await generate_schema_proposal(criteria_summary)
+        schema_proposal = schema_proposal_result["schema"]
+
+        # Update session with reasoning and internal thoughts
+        search_session.reasoning = schema_proposal_result["reasoning"]
+        search_session.internal_thoughts = schema_proposal_result["internal_thoughts"]
+        session.add(search_session)
+        session.commit()
 
         return {
             "schema_proposal": schema_proposal,
+            "reasoning": schema_proposal_result["reasoning"],
+            "internal_thoughts": schema_proposal_result["internal_thoughts"],
             "search_id": search_session.id
         }
 
@@ -418,10 +552,19 @@ async def deep_research_generate_sql(req: SqlGenerationRequest):
             raise HTTPException(status_code=400, detail="Not a deep research session")
 
         # Generate SQL query based on criteria and agreed schema
-        sql_query = await generate_sql_query(req.criteria, search_session.schema_agreed)
+        sql_query_result = await generate_sql_query(req.criteria, search_session.schema_agreed)
+        sql_query = sql_query_result["sql_query"]
+
+        # Update session with reasoning and internal thoughts
+        search_session.reasoning = sql_query_result["reasoning"]
+        search_session.internal_thoughts = sql_query_result["internal_thoughts"]
+        session.add(search_session)
+        session.commit()
 
         return {
             "sql_query": sql_query,
+            "reasoning": sql_query_result["reasoning"],
+            "internal_thoughts": sql_query_result["internal_thoughts"],
             "search_id": search_session.id
         }
 
@@ -456,3 +599,160 @@ async def deep_research_execute_analysis(search_id: int):
             "message": "Analysis completed",
             "search_id": search_session.id
         }
+
+@app.post("/api/deep_research/chat")
+async def deep_research_chat(req: InterviewRequest):
+    """Universal endpoint for deep research chat that manages the entire process"""
+    with Session(engine) as session:
+        # Find existing session in any stage or create new one
+        existing_session = session.exec(
+            select(SearchSession).where(
+                SearchSession.mode == "deep",
+                SearchSession.status.in_(["pending", "processing"])
+            ).order_by(desc(SearchSession.created_at))
+        ).first()
+
+        if not existing_session:
+            # Create a new deep research session
+            new_session = SearchSession(
+                query_text=req.history[-1]['content'] if req.history else "Deep Research Query",
+                mode="deep",
+                stage="interview",
+                status="pending",
+                limit_count=200  # Default for deep research
+            )
+            session.add(new_session)
+            session.commit()
+            session.refresh(new_session)
+            search_session = new_session
+        else:
+            search_session = existing_session
+
+        # Process based on current stage
+        if search_session.stage == "interview":
+            # Conduct the interview using LLM
+            try:
+                interview_response = await conduct_interview(req.history)
+            except ConnectionError:
+                # LLM is unavailable, return error message and stop the process
+                return {
+                    "type": "interview",
+                    "message": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
+                    "needs_more_info": False,
+                    "search_id": search_session.id,
+                    "stage": search_session.stage,
+                    "error": "llm_unavailable"
+                }
+
+            # Update session with interview data if needed
+            if search_session.interview_data:
+                try:
+                    interview_data = json.loads(search_session.interview_data)
+                except json.JSONDecodeError:
+                    interview_data = {}
+            else:
+                interview_data = {}
+
+            # Add the latest response to interview data
+            interview_data[len(interview_data)] = {
+                "question": req.history[-1]['content'] if req.history else "",
+                "response": interview_response.get("response", ""),
+                "needs_more_info": interview_response.get("needs_more_info", True),
+                "reasoning": interview_response.get("reasoning", ""),
+                "internal_thoughts": interview_response.get("internal_thoughts", "")
+            }
+
+            search_session.interview_data = json.dumps(interview_data, ensure_ascii=False)
+
+            # Check if user is confirming schema in natural language
+            if req.history and len(req.history) > 0:
+                last_user_message = req.history[-1]
+                if last_user_message.get("role") == "user":
+                    user_input = last_user_message.get("content", "")
+
+                    # Detect if user is confirming schema
+                    schema_confirmation_result = detect_schema_confirmation(user_input)
+                    if schema_confirmation_result["result"]:
+                        # If we're in schema agreement stage, finalize it
+                        if search_session.stage == "schema_agreement":
+                            # Use the schema proposal from the last interview response if available
+                            schema_proposal = interview_response.get("schema_proposal")
+
+                            if not schema_proposal:
+                                # Generate schema based on interview data if not in response
+                                criteria_summary = ""
+                                if search_session.interview_data:
+                                    try:
+                                        interview_data = json.loads(search_session.interview_data)
+                                        # Extract criteria from interview data
+                                        for entry in interview_data.values():
+                                            if "criteria_summary" in entry:
+                                                criteria_summary = entry["criteria_summary"]
+                                                break
+                                            elif "response" in entry:
+                                                criteria_summary += entry["response"] + " "
+                                    except:
+                                        criteria_summary = "Пользователь хочет купить товар"
+
+                                # Generate schema proposal
+                                schema_proposal_result = await generate_schema_proposal(criteria_summary)
+                                schema_proposal = schema_proposal_result["schema"]
+
+                            # Update session stage to parsing
+                            search_session.stage = "parsing"
+                            search_session.schema_json = schema_proposal
+
+                            session.add(search_session)
+                            session.commit()
+
+                            return {
+                                "type": "schema_confirmed",
+                                "message": "Схема подтверждена! Начинаю сбор данных...",
+                                "search_id": search_session.id,
+                                "stage": search_session.stage,
+                                "reasoning": schema_confirmation_result["reasoning"],
+                                "internal_thoughts": schema_confirmation_result["internal_thoughts"]
+                            }
+
+            # Move to next stage if enough info gathered
+            if not interview_response.get("needs_more_info", True) and search_session.stage == "interview":
+                search_session.stage = "schema_agreement"
+
+            session.add(search_session)
+            session.commit()
+
+            # Prepare response based on whether schema was proposed
+            response_data = {
+                "type": "interview",
+                "message": interview_response.get("response", ""),
+                "reasoning": interview_response.get("reasoning", ""),
+                "internal_thoughts": interview_response.get("internal_thoughts", ""),
+                "needs_more_info": interview_response.get("needs_more_info", True),
+                "search_id": search_session.id,
+                "stage": search_session.stage
+            }
+
+            # Include schema proposal if provided in the response
+            if interview_response.get("schema_proposal"):
+                response_data["schema_proposal"] = interview_response["schema_proposal"]
+
+            return response_data
+
+        elif search_session.stage == "schema_agreement":
+            # Handle schema agreement
+            return await deep_research_schema_agreement(SchemaAgreementRequest(
+                search_id=search_session.id,
+                schema_json=search_session.schema_json or "{}"
+            ))
+
+        elif search_session.stage == "parsing":
+            # Handle parsing
+            return await deep_research_start_parsing(search_session.id)
+
+        elif search_session.stage == "analysis":
+            # Handle analysis
+            return await deep_research_execute_analysis(search_session.id)
+
+        else:
+            # Unknown stage
+            raise HTTPException(status_code=400, detail=f"Unknown stage: {search_session.stage}")

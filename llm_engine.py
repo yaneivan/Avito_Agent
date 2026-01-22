@@ -35,7 +35,7 @@ async def decide_action(history: list, available_schemas: list[str]) -> dict:
         content = msg.get("content", "")
         context_str += f"{role}: {content}\n"
 
-    prompt = f"""Ты — мозг ассистента Avito. 
+    prompt = f"""Ты — мозг ассистента Avito.
 Твоя задача: понять, нужен ли пользователю поиск товаров или просто ответ в чате.
 
 ДОСТУПНЫЕ СХЕМЫ: [{schemas_str}]
@@ -46,28 +46,32 @@ async def decide_action(history: list, available_schemas: list[str]) -> dict:
 - Будь гибким. Если в сообщении есть намерение найти/сравнить/купить — выбирай "search".
 - Если это просто разговор, вопрос о тебе или уточнение без поиска — выбирай "chat".
 - В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "continue_chat", "start_search", "start_deep_research", "provide_recommendations".
 - Если action: "chat", то search_query, limit и schema_name ДОЛЖНЫ БЫТЬ null.
 - Если создаешь новую схему, дай ей короткое имя на английском.
 
 ОТВЕТЬ ТОЛЬКО JSON:
 {{
     "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "continue_chat | start_search | start_deep_research | provide_recommendations",
     "action": "search" | "chat",
     "search_query": "ключевые слова для поиска или null",
     "limit": 5,
     "schema_name": "имя_схемы или null",
     "reply": "текст твоего ответа если action=chat или null"
 }}"""
-    
+
     try:
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=400
+            max_tokens=600
         )
         content = response.choices[0].message.content
-        if "```" in content: 
+        if "```" in content:
             content = content.split("```")[1].replace("json", "").strip()
         return json.loads(content)
     except:
@@ -75,6 +79,8 @@ async def decide_action(history: list, available_schemas: list[str]) -> dict:
             "action": "chat",
             "reply": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
             "reasoning": "Ошибка подключения к LLM",
+            "internal_thoughts": "Произошла ошибка при подключении к LLM",
+            "next_action": "continue_chat",
             "search_query": None,
             "limit": 5,
             "schema_name": None
@@ -89,10 +95,19 @@ async def extract_specs(title: str, desc: str, price: str, img_path: str | None)
 ИНСТРУКЦИЯ:
 - Найди бренд, модель и ключевые технические параметры.
 - В поле "notes" напиши важные пометки (например: 'продажа только оптом', 'несколько штук в наличии', 'есть дефекты').
-- Верни чистый JSON."""
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- Верни ТОЛЬКО JSON.
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "specs": "извлеченные характеристики",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения"
+}}"""
 
     messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-    
+
     if img_path:
         b64_img = encode_image_to_base64(img_path)
         if b64_img:
@@ -106,47 +121,71 @@ async def extract_specs(title: str, desc: str, price: str, img_path: str | None)
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=800,
+            max_tokens=1000,
             temperature=0.0
         )
         res = response.choices[0].message.content
-        if "```" in res: 
+        if "```" in res:
             res = res.split("```")[1].replace("json", "").strip()
-        return json.loads(res)
+        parsed_res = json.loads(res)
+        return parsed_res["specs"]
     except Exception as e:
         print(f"LOG ERROR Extraction: {e}")
         return {"notes": "Ошибка извлечения данных"}
 
-async def generate_schema_structure(topic: str) -> str:
+async def generate_schema_structure(topic: str) -> dict:
     prompt = f"""Создай простую JSON схему (5-6 полей) для извлечения данных о товарах типа '{topic}'.
 Используй только типы "str", "int", "float".
 Каждое поле должно иметь "type" и "desc".
-Верни ТОЛЬКО чистый JSON."""
+В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "return_schema", "request_more_info", "modify_schema".
+Верни ТОЛЬКО JSON.
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "schema": "схема в формате JSON",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "return_schema | request_more_info | modify_schema"
+}}"""
     try:
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=400
+            max_tokens=600
         )
         res = response.choices[0].message.content
-        if "```" in res: 
+        if "```" in res:
             res = res.split("```")[1].replace("json", "").strip()
-        json.loads(res) # Валидация
-        return res
+        parsed_res = json.loads(res)
+        json.loads(parsed_res["schema"]) # Валидация
+        return parsed_res
     except:
-        return json.dumps({
+        default_schema = json.dumps({
             "brand": {"type": "str", "desc": "Бренд"},
             "model": {"type": "str", "desc": "Модель"},
             "condition": {"type": "str", "desc": "Состояние"}
         })
+        return {
+            "schema": default_schema,
+            "reasoning": "Ошибка генерации схемы",
+            "internal_thoughts": "Произошла ошибка при генерации схемы, возвращаю стандартную схему",
+            "next_action": "return_schema"
+        }
 
-async def summarize_search_results(query: str, items: list) -> str:
+async def summarize_search_results(query: str, items: list) -> dict:
     if not items:
-        return "Поиск не дал результатов."
+        return {
+            "summary": "Поиск не дал результатов.",
+            "reasoning": "Нет данных для анализа",
+            "internal_thoughts": "Нет результатов поиска для создания отчета",
+            "next_action": "inform_no_results"
+        }
 
     data_block = ""
-    for i, item in enumerate(items[:10]): 
+    for i, item in enumerate(items[:10]):
         specs = item.structured_data if item.structured_data else "Нет данных"
         data_block += f"ЛОТ #{i+1}\nНазвание: {item.title}\nЦена: {item.price}\nТТХ: {specs}\n\n"
 
@@ -166,18 +205,39 @@ async def summarize_search_results(query: str, items: list) -> str:
 2. **Лучший выбор** (укажи номер лота и почему это выгодно).
 3. **Риски** (подозрительно дешево, неполное описание).
 
-Будь краток, не пиши приветствий. Максимум 150-200 слов."""
-    
+Будь краток, не пиши приветствий. Максимум 150-200 слов.
+
+ИНСТРУКЦИЯ:
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "present_results", "request_feedback", "suggest_alternatives".
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "summary": "аналитический отчет",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "present_results | request_feedback | suggest_alternatives"
+}}"""
+
     try:
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=1000
+            max_tokens=1200
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if "```" in content:
+            content = content.split("```")[1].replace("json", "").strip()
+        return json.loads(content)
     except Exception as e:
-        return f"Ошибка при создании отчета: {e}"
+        return {
+            "summary": f"Ошибка при создании отчета: {e}",
+            "reasoning": "Ошибка при создании отчета",
+            "internal_thoughts": f"Произошла ошибка при создании отчета: {e}",
+            "next_action": "inform_error"
+        }
 
 async def plan_search_action(user_text: str) -> dict:
     """Для обратной совместимости с вызовами в server.py"""
@@ -202,11 +262,17 @@ async def conduct_interview(history: list) -> dict:
 - Не начинай поиск сразу, собирай информацию.
 - После каждого ответа пользователя оценивай, достаточно ли информации для формирования схемы извлечения.
 - Когда информации достаточно, предложи схему извлечения данных в виде текстового описания.
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "continue_interview", "propose_schema", "start_parsing", "complete_analysis".
 - Отвечай в формате JSON.
 
 ОТВЕТЬ ТОЛЬКО JSON:
 {{
     "response": "текст вопроса или ответа, может включать предложение схемы, когда информация достаточна",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "continue_interview | propose_schema | start_parsing | complete_analysis",
     "needs_more_info": true/false,
     "criteria_summary": "краткое резюме собранных критериев",
     "schema_proposal": "предложенная схема в формате JSON (только когда needs_more_info=false)"
@@ -217,7 +283,7 @@ async def conduct_interview(history: list) -> dict:
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
-            max_tokens=800
+            max_tokens=1000
         )
         content = response.choices[0].message.content
         if "```" in content:
@@ -245,11 +311,15 @@ async def conduct_interview_basic(history: list) -> dict:
 - Задавай уточняющие вопросы: бюджет, предпочтения по характеристикам, состояние, бренды, критичные дефекты и т.д.
 - Не начинай поиск сразу, собирай информацию.
 - После каждого ответа пользователя оценивай, достаточно ли информации для формирования схемы извлечения.
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
 - Отвечай в формате JSON.
 
 ОТВЕТЬ ТОЛЬКО JSON:
 {{
     "response": "текст вопроса или ответа",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
     "needs_more_info": true/false,
     "criteria_summary": "краткое резюме собранных критериев"
 }}"""
@@ -259,7 +329,7 @@ async def conduct_interview_basic(history: list) -> dict:
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
-            max_tokens=500
+            max_tokens=700
         )
         content = response.choices[0].message.content
         if "```" in content:
@@ -269,7 +339,7 @@ async def conduct_interview_basic(history: list) -> dict:
         print(f"Interview error: {e}")
         raise ConnectionError("LLM is unavailable")
 
-async def generate_schema_proposal(criteria: str) -> str:
+async def generate_schema_proposal(criteria: str) -> dict:
     """Generate a schema proposal based on gathered criteria"""
     prompt = f"""Создай JSON-схему для извлечения характеристик из объявлений на Avito.
 КРИТЕРИИ ПОЛЬЗОВАТЕЛЯ: {criteria}
@@ -279,23 +349,40 @@ async def generate_schema_proposal(criteria: str) -> str:
 - Используй только типы "str", "int", "float"
 - Каждое поле должно иметь "type" и "desc" (описание)
 - Схема должна позволить провести SQL-фильтрацию по критериям пользователя
-- Верни ТОЛЬКО чистый JSON-объект схемы."""
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "return_schema", "request_more_info", "modify_schema".
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "schema": "схема в формате JSON",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "return_schema | request_more_info | modify_schema"
+}}"""
 
     try:
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=600
+            max_tokens=800
         )
         res = response.choices[0].message.content
         if "```" in res:
             res = res.split("```")[1].replace("json", "").strip()
         parsed_res = json.loads(res)
-        return json.dumps(parsed_res, ensure_ascii=False, indent=2)
+
+        # Возвращаем словарь с самой схемой и рассуждениями
+        return {
+            "schema": json.dumps(parsed_res["schema"], ensure_ascii=False, indent=2),
+            "reasoning": parsed_res.get("reasoning", ""),
+            "internal_thoughts": parsed_res.get("internal_thoughts", ""),
+            "next_action": parsed_res.get("next_action", "return_schema")
+        }
     except Exception as e:
         print(f"Schema generation error: {e}")
-        # Return a default schema
+        # Return a default schema with error information
         default_schema = {
             "brand": {"type": "str", "desc": "Бренд товара"},
             "model": {"type": "str", "desc": "Модель товара"},
@@ -303,9 +390,14 @@ async def generate_schema_proposal(criteria: str) -> str:
             "condition": {"type": "str", "desc": "Состояние (новый/б/у)"},
             "year": {"type": "int", "desc": "Год выпуска"}
         }
-        return json.dumps(default_schema, ensure_ascii=False, indent=2)
+        return {
+            "schema": json.dumps(default_schema, ensure_ascii=False, indent=2),
+            "reasoning": "Ошибка генерации схемы",
+            "internal_thoughts": f"Произошла ошибка при генерации схемы: {e}",
+            "next_action": "return_schema"
+        }
 
-async def generate_sql_query(criteria: str, schema_json: str) -> str:
+async def generate_sql_query(criteria: str, schema_json: str) -> dict:
     """Generate SQL query based on user criteria and extraction schema"""
     try:
         schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
@@ -324,21 +416,38 @@ async def generate_sql_query(criteria: str, schema_json: str) -> str:
 - Фильтруй по критериям пользователя
 - Сортируй по релевантности или цене
 - Ограничь результат 20 лучшими вариантами
-- Верни ТОЛЬКО SQL-запрос без дополнительного текста."""
+- В поле "reasoning" кратко напиши ход своих мыслей.
+- В поле "internal_thoughts" укажи внутренние размышления, почему ты принял то или иное решение.
+- В поле "next_action" укажи следующее действие: "execute_query", "modify_query", "request_more_info".
+- Верни ТОЛЬКО JSON.
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "sql_query": "SQL-запрос",
+    "reasoning": "почему выбрано это действие",
+    "internal_thoughts": "внутренние размышления о принятии решения",
+    "next_action": "execute_query | modify_query | request_more_info"
+}}"""
 
     try:
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=400
+            max_tokens=600
         )
-        sql_query = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content.strip()
         # Clean up the response if it contains extra text
-        if "```" in sql_query:
-            sql_query = sql_query.split("```")[1].replace("sql", "").strip()
-        return sql_query
+        if "```" in content:
+            content = content.split("```")[1].replace("json", "").strip()
+        result = json.loads(content)
+        return result
     except Exception as e:
         print(f"SQL generation error: {e}")
-        # Return a default query
-        return f"SELECT * FROM item WHERE json_extract(structured_data, '$.price') IS NOT NULL ORDER BY json_extract(structured_data, '$.price') ASC LIMIT 20;"
+        # Return a default query with error information
+        return {
+            "sql_query": f"SELECT * FROM item WHERE json_extract(structured_data, '$.price') IS NOT NULL ORDER BY json_extract(structured_data, '$.price') ASC LIMIT 20;",
+            "reasoning": "Ошибка генерации SQL-запроса",
+            "internal_thoughts": f"Произошла ошибка при генерации SQL-запроса: {e}",
+            "next_action": "execute_query"
+        }
