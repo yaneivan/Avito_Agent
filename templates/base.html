@@ -28,17 +28,33 @@
             border-bottom: 2px solid #4CAF50;
         }
         .container {
-            background: #1a1a1a;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            /* Убираем общий фон контейнера, чтобы карточки не сливались */
+            /* background: #1a1a1a; */
+            /* padding: 20px; */
+            /* border-radius: 8px; */
+            /* box-shadow: 0 4px 6px rgba(0,0,0,0.3); */
+        }
+        /* Скроллбары для темной темы */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #444; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555; 
         }
     </style>
 </head>
 <body>
     <!-- Navigation Header -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
-        <div class="container">
+        <div class="container-fluid" style="max-width: 1200px;">
             <a class="navbar-brand fw-bold" href="/">
                 <i class="fas fa-robot me-2" style="color: #4CAF50;"></i>Avito Agent
             </a>
@@ -69,7 +85,7 @@
         </div>
     </nav>
 
-    <div class="container mt-4">
+    <div class="container mt-4" style="max-width: 1200px;">
         {% block content %}{% endblock %}
     </div>
 

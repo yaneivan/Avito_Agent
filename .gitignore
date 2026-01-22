@@ -5,3 +5,5 @@ database.db
 /tests/__pycache__
 QWEN.md
 qwen_tester/chat_history.json
+/routers/__pycache__
+/services/__pycache__
