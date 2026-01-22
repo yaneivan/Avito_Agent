@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from database import create_db_and_tables, engine, SearchSession, ExtractionSchema, Item, SearchItemLink
 from services import ProcessingService
 from image_utils import save_base64_image
-from llm_engine import decide_action, generate_schema_structure, conduct_interview, generate_schema_proposal, generate_sql_query
+from llm_engine import decide_action, generate_schema_structure, conduct_interview, conduct_interview_basic, generate_schema_proposal, generate_sql_query
 
 class ItemSchema(BaseModel):
     title: str; price: str; url: str; description: Optional[str] = None; image_base64: Optional[str] = None; local_path: Optional[str] = None 
@@ -32,6 +32,11 @@ class InterviewRequest(BaseModel):
 class SchemaAgreementRequest(BaseModel):
     search_id: int
     schema_json: str
+
+class ChatSchemaAgreementRequest(BaseModel):
+    search_id: int
+    schema_json: str
+    history: list
 
 class SqlGenerationRequest(BaseModel):
     search_id: int
@@ -144,6 +149,27 @@ def get_search_items(search_id: int):
 @app.post("/api/log")
 def remote_log(log: LogMessage): return {"status": "ok"}
 
+def detect_schema_confirmation(user_input: str) -> bool:
+    """Detect if user is confirming the schema in natural language"""
+    user_input_lower = user_input.lower().strip()
+
+    confirmation_keywords = [
+        'подтверждаю', 'подтвердить', 'да', 'верно', 'согласен', 'ok', 'okay',
+        'принято', 'угу', 'давай', 'согласен', 'подходит', 'хорошо'
+    ]
+
+    # Check if input contains confirmation keywords but not modification keywords
+    confirmation_found = any(keyword in user_input_lower for keyword in confirmation_keywords)
+
+    modification_keywords = [
+        'изменить', 'поменять', 'редактировать', 'не подходит', 'нужно изменить',
+        'другое', 'не согласен', 'передумал', 'назад', 'отмена'
+    ]
+
+    modification_found = any(keyword in user_input_lower for keyword in modification_keywords)
+
+    return confirmation_found and not modification_found
+
 @app.post("/api/deep_research/interview")
 async def deep_research_interview(req: InterviewRequest):
     """Endpoint for conducting the interview phase of deep research"""
@@ -208,20 +234,73 @@ async def deep_research_interview(req: InterviewRequest):
 
         search_session.interview_data = json.dumps(interview_data, ensure_ascii=False)
 
+        # Check if user is confirming schema in natural language
+        if req.history and len(req.history) > 0:
+            last_user_message = req.history[-1]
+            if last_user_message.get("role") == "user":
+                user_input = last_user_message.get("content", "")
+
+                # Detect if user is confirming schema
+                if detect_schema_confirmation(user_input):
+                    # If we're in schema agreement stage, finalize it
+                    if search_session.stage == "schema_agreement":
+                        # Use the schema proposal from the last interview response if available
+                        schema_proposal = interview_response.get("schema_proposal")
+
+                        if not schema_proposal:
+                            # Generate schema based on interview data if not in response
+                            criteria_summary = ""
+                            if search_session.interview_data:
+                                try:
+                                    interview_data = json.loads(search_session.interview_data)
+                                    # Extract criteria from interview data
+                                    for entry in interview_data.values():
+                                        if "criteria_summary" in entry:
+                                            criteria_summary = entry["criteria_summary"]
+                                            break
+                                        elif "response" in entry:
+                                            criteria_summary += entry["response"] + " "
+                                except:
+                                    criteria_summary = "Пользователь хочет купить товар"
+
+                            # Generate schema proposal
+                            schema_proposal = await generate_schema_proposal(criteria_summary)
+
+                        # Update session stage to parsing
+                        search_session.stage = "parsing"
+                        search_session.schema_json = schema_proposal
+
+                        session.add(search_session)
+                        session.commit()
+
+                        return {
+                            "type": "schema_confirmed",
+                            "message": "Схема подтверждена! Начинаю сбор данных...",
+                            "search_id": search_session.id,
+                            "stage": search_session.stage
+                        }
+
         # Move to next stage if enough info gathered
-        if not interview_response.get("needs_more_info", True):
+        if not interview_response.get("needs_more_info", True) and search_session.stage == "interview":
             search_session.stage = "schema_agreement"
 
         session.add(search_session)
         session.commit()
 
-        return {
+        # Prepare response based on whether schema was proposed
+        response_data = {
             "type": "interview",
             "message": interview_response.get("response", ""),
             "needs_more_info": interview_response.get("needs_more_info", True),
             "search_id": search_session.id,
             "stage": search_session.stage
         }
+
+        # Include schema proposal if provided in the response
+        if interview_response.get("schema_proposal"):
+            response_data["schema_proposal"] = interview_response["schema_proposal"]
+
+        return response_data
 
 @app.post("/api/deep_research/generate_schema_proposal")
 async def deep_research_generate_schema_proposal(search_id: int):

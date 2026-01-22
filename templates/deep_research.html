@@ -23,21 +23,6 @@
         </div>
     </div>
 
-    <!-- Schema Agreement Stage -->
-    <div id="schema-stage" class="hidden chat-container" style="display: none; flex: 1; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-        <div class="chat-header" style="padding: 15px 20px; background: #222; border-bottom: 1px solid #333; font-weight: bold;">Согласование схемы извлечения данных</div>
-        <div class="results-container" style="padding: 20px; overflow-y: auto;">
-            <h3>Согласование схемы извлечения данных</h3>
-            <p>На основе интервью я подготовил схему для извлечения характеристик из объявлений:</p>
-            <div class="editor-container" style="padding: 20px; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; margin: 10px 0;">
-                <textarea id="schema-editor" class="json-editor" placeholder="Здесь появится предложенная схема..." style="width: 100%; height: 200px; background: #252525; color: white; border: 1px solid #444; border-radius: 4px; padding: 10px; font-family: monospace; resize: vertical;"></textarea>
-            </div>
-            <div style="margin-top: 15px;">
-                <button id="confirm-schema-btn" class="btn" style="padding: 12px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Подтвердить схему</button>
-                <button id="back-to-interview-btn" class="btn btn-secondary" style="padding: 12px 20px; background: #666; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Назад к интервью</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Parsing Progress Stage -->
     <div id="parsing-stage" class="hidden progress-container" style="display: none; padding: 20px; text-align: center;">
@@ -132,7 +117,6 @@
 
         // Hide all stages
         document.getElementById('interview-stage').classList.add('hidden');
-        document.getElementById('schema-stage').classList.add('hidden');
         document.getElementById('parsing-stage').classList.add('hidden');
         document.getElementById('results-stage').classList.add('hidden');
 
@@ -153,6 +137,170 @@
         addMsg('user', txt);
         deepHistory.push({role: "user", content: txt});
 
+        // Check if user is confirming schema (natural language confirmation)
+        const lowerTxt = txt.toLowerCase();
+        const schemaConfirmationKeywords = ['подтверждаю', 'подтвердить', 'да', 'верно', 'согласен', 'ok', 'okay', 'принято'];
+        const containsConfirmation = schemaConfirmationKeywords.some(keyword => lowerTxt.includes(keyword));
+
+        // Check if user wants to modify schema
+        const schemaModificationKeywords = ['изменить', 'поменять', 'редактировать', 'не подходит', 'нужно изменить', 'другое'];
+        const containsModification = schemaModificationKeywords.some(keyword => lowerTxt.includes(keyword));
+
+        try {
+            // If user is confirming schema, send schema agreement request
+            if (containsConfirmation && !containsModification) {
+                // Find the last schema in the conversation to confirm
+                const lastSchemaMessage = findLastSchemaMessage();
+
+                if (lastSchemaMessage) {
+                    // Send schema agreement request
+                    const schemaAgreementRes = await fetch('/api/deep_research/schema_agreement', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            search_id: deepSearchId,
+                            schema_json: lastSchemaMessage // Assuming this is the JSON schema
+                        })
+                    });
+                    const schemaAgreementData = await schemaAgreementRes.json();
+
+                    if (schemaAgreementData.status === 'success') {
+                        // Move to parsing stage
+                        showStage('parsing');
+
+                        // Start parsing
+                        startParsingPhase();
+
+                        // Add confirmation message to chat
+                        addMsg('assistant', '✅ Схема подтверждена! Начинаю сбор данных...');
+                        return;
+                    }
+                }
+            }
+
+            const res = await fetch('/api/deep_research/interview', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    history: deepHistory
+                })
+            });
+            const data = await res.json();
+
+            if (data.type === 'interview') {
+                // Add bot response
+                addMsg('assistant', marked.parse(data.message), true);
+                deepHistory.push({role: "assistant", content: data.message});
+
+                // Store search ID
+                if (data.search_id) {
+                    deepSearchId = data.search_id;
+                }
+
+                // Check if schema was proposed in the response
+                if (data.schema_proposal) {
+                    // Save the proposed schema for later confirmation
+                    window.lastProposedSchema = data.schema_proposal;
+
+                    // Parse the schema to create a human-readable explanation
+                    try {
+                        const schemaObj = JSON.parse(data.schema_proposal);
+
+                        // Create a human-readable explanation of the schema
+                        let schemaExplanation = "📋 Я подготовил схему для извлечения данных из объявлений:\n\n";
+
+                        if (schemaObj.name) {
+                            schemaExplanation += `**Название схемы:** ${schemaObj.name}\n\n`;
+                        }
+
+                        if (schemaObj.description) {
+                            schemaExplanation += `**Описание:** ${schemaObj.description}\n\n`;
+                        }
+
+                        schemaExplanation += "**Поля для извлечения:**\n";
+                        if (schemaObj.properties) {
+                            for (const [key, property] of Object.entries(schemaObj.properties)) {
+                                schemaExplanation += `- **${key}**: ${property.description || 'Описание отсутствует'} (тип: ${property.type})\n`;
+                            }
+                        }
+
+                        schemaExplanation += "\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'. Если нужно что-то изменить - напишите об этом.";
+
+                        // Add the schema explanation to the chat
+                        addMsg('assistant', marked.parse(schemaExplanation), true);
+                    } catch (parseErr) {
+                        console.error("Error parsing schema:", parseErr);
+                        // If parsing fails, just show the raw JSON
+                        addMsg('assistant', `📋 Предлагаемая схема (в формате JSON):\n\`\`\`json\n${data.schema_proposal}\n\`\`\`\n\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'.`);
+                    }
+                }
+
+                // Check if we can move to next stage
+                if (!data.needs_more_info && !data.error) {
+                    // The model will now include schema proposal in its response
+                    // No need to call generateAndShowSchemaProposal separately
+                }
+                // If there's an error (like LLM unavailable), don't proceed to next stage
+                else if (data.error) {
+                    // Disable input to prevent further attempts
+                    inp.disabled = true;
+                    sendBtn.disabled = true;
+                    finishInterviewBtn.disabled = true;
+
+                    // Show error message
+                    addMsg('assistant', `❌ ${data.error}`);
+                }
+            }
+            else if (data.type === 'schema_confirmed') {
+                // Handle schema confirmation
+                addMsg('assistant', marked.parse(data.message), true);
+
+                // Update search ID if needed
+                if (data.search_id) {
+                    deepSearchId = data.search_id;
+                }
+
+                // Move to parsing stage
+                showStage('parsing');
+
+                // Start parsing
+                startParsingPhase();
+            }
+        } catch (err) {
+            console.error(err);
+            addMsg('assistant', '❌ Ошибка связи с сервером');
+        }
+
+        inp.disabled = false;
+        sendBtn.disabled = false;
+    }
+
+    // Helper function to find the last schema message in the conversation
+    function findLastSchemaMessage() {
+        // Look for the last message that contains a schema
+        // This would need to be implemented based on how the schema is stored/retrieved
+        // For now, we'll store the last proposed schema in a variable
+        return window.lastProposedSchema || null;
+    }
+
+    // This function is no longer used as schema proposal is now included in the interview response
+    // The schema is generated and presented by the LLM when it determines sufficient information has been gathered
+
+    // Event listeners
+    sendBtn.addEventListener('click', sendMessage);
+
+    inp.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+
+    finishInterviewBtn.addEventListener('click', async () => {
+        // Add user message indicating interview is finished
+        addMsg('user', 'Завершить интервью');
+        deepHistory.push({role: "user", content: "Завершить интервью"});
+
+        // Send the message to the server to continue the interview process
         try {
             const res = await fetch('/api/deep_research/interview', {
                 method: 'POST',
@@ -173,62 +321,48 @@
                     deepSearchId = data.search_id;
                 }
 
-                // Check if we can move to next stage
-                if (!data.needs_more_info && !data.error) {
-                    setTimeout(() => {
-                        generateAndShowSchemaProposal();
-                    }, 1000);
-                }
-                // If there's an error (like LLM unavailable), don't proceed to next stage
-                else if (data.error) {
-                    // Disable input to prevent further attempts
-                    inp.disabled = true;
-                    sendBtn.disabled = true;
-                    finishInterviewBtn.disabled = true;
+                // Check if schema was proposed in the response
+                if (data.schema_proposal) {
+                    // Save the proposed schema for later confirmation
+                    window.lastProposedSchema = data.schema_proposal;
 
-                    // Show error message
-                    addMsg('assistant', `❌ ${data.error}`);
+                    // Parse the schema to create a human-readable explanation
+                    try {
+                        const schemaObj = JSON.parse(data.schema_proposal);
+
+                        // Create a human-readable explanation of the schema
+                        let schemaExplanation = "📋 Я подготовил схему для извлечения данных из объявлений:\n\n";
+
+                        if (schemaObj.name) {
+                            schemaExplanation += `**Название схемы:** ${schemaObj.name}\n\n`;
+                        }
+
+                        if (schemaObj.description) {
+                            schemaExplanation += `**Описание:** ${schemaObj.description}\n\n`;
+                        }
+
+                        schemaExplanation += "**Поля для извлечения:**\n";
+                        if (schemaObj.properties) {
+                            for (const [key, property] of Object.entries(schemaObj.properties)) {
+                                schemaExplanation += `- **${key}**: ${property.description || 'Описание отсутствует'} (тип: ${property.type})\n`;
+                            }
+                        }
+
+                        schemaExplanation += "\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'. Если нужно что-то изменить - напишите об этом.";
+
+                        // Add the schema explanation to the chat
+                        addMsg('assistant', marked.parse(schemaExplanation), true);
+                    } catch (parseErr) {
+                        console.error("Error parsing schema:", parseErr);
+                        // If parsing fails, just show the raw JSON
+                        addMsg('assistant', `📋 Предлагаемая схема (в формате JSON):\n\`\`\`json\n${data.schema_proposal}\n\`\`\`\n\nПожалуйста, подтвердите схему, написав 'подтверждаю', 'да' или 'согласен'.`);
+                    }
                 }
             }
         } catch (err) {
             console.error(err);
             addMsg('assistant', '❌ Ошибка связи с сервером');
         }
-
-        inp.disabled = false;
-        sendBtn.disabled = false;
-    }
-
-    // Generate and show schema proposal
-    async function generateAndShowSchemaProposal() {
-        try {
-            const res = await fetch(`/api/deep_research/generate_schema_proposal?search_id=${deepSearchId}`, {
-                method: 'GET',
-                headers: {'Content-Type': 'application/json'}
-            });
-            const data = await res.json();
-
-            if (data.schema_proposal) {
-                schemaEditor.value = data.schema_proposal;
-                showStage('schema');
-            }
-        } catch (err) {
-            console.error(err);
-            addMsg('assistant', '❌ Ошибка при генерации схемы');
-        }
-    }
-
-    // Event listeners
-    sendBtn.addEventListener('click', sendMessage);
-
-    inp.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
-    });
-
-    finishInterviewBtn.addEventListener('click', () => {
-        generateAndShowSchemaProposal();
     });
 
     confirmSchemaBtn.addEventListener('click', async () => {

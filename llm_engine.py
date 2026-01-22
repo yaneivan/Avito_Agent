@@ -201,6 +201,50 @@ async def conduct_interview(history: list) -> dict:
 - Задавай уточняющие вопросы: бюджет, предпочтения по характеристикам, состояние, бренды, критичные дефекты и т.д.
 - Не начинай поиск сразу, собирай информацию.
 - После каждого ответа пользователя оценивай, достаточно ли информации для формирования схемы извлечения.
+- Когда информации достаточно, предложи схему извлечения данных в виде текстового описания.
+- Отвечай в формате JSON.
+
+ОТВЕТЬ ТОЛЬКО JSON:
+{{
+    "response": "текст вопроса или ответа, может включать предложение схемы, когда информация достаточна",
+    "needs_more_info": true/false,
+    "criteria_summary": "краткое резюме собранных критериев",
+    "schema_proposal": "предложенная схема в формате JSON (только когда needs_more_info=false)"
+}}"""
+
+    try:
+        response = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=800
+        )
+        content = response.choices[0].message.content
+        if "```" in content:
+            content = content.split("```")[1].replace("json", "").strip()
+        return json.loads(content)
+    except Exception as e:
+        print(f"Interview error: {e}")
+        raise ConnectionError("LLM is unavailable")
+
+async def conduct_interview_basic(history: list) -> dict:
+    """Basic version of interview without schema proposal for backward compatibility"""
+    context_str = ""
+    for msg in history[-5:]:  # Take last 5 messages
+        role = "User" if msg["role"] == "user" else "Assistant"
+        content = msg.get("content", "")
+        context_str += f"{role}: {content}\n"
+
+    prompt = f"""Ты — интервьюер для глубокого анализа рынка.
+Твоя задача: задавать уточняющие вопросы пользователю, чтобы собрать полный портрет его потребностей.
+
+ИСТОРИЯ:
+{context_str}
+
+ИНСТРУКЦИЯ:
+- Задавай уточняющие вопросы: бюджет, предпочтения по характеристикам, состояние, бренды, критичные дефекты и т.д.
+- Не начинай поиск сразу, собирай информацию.
+- После каждого ответа пользователя оценивай, достаточно ли информации для формирования схемы извлечения.
 - Отвечай в формате JSON.
 
 ОТВЕТЬ ТОЛЬКО JSON:
