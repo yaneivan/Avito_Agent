@@ -186,7 +186,10 @@ async def deep_research_interview(req: InterviewRequest):
 
         # Update session with interview data if needed
         if search_session.interview_data:
-            interview_data = json.loads(search_session.interview_data)
+            try:
+                interview_data = json.loads(search_session.interview_data)
+            except json.JSONDecodeError:
+                interview_data = {}
         else:
             interview_data = {}
 

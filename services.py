@@ -25,11 +25,19 @@ class ProcessingService:
                 schema_record = session.get(ExtractionSchema, search_request.schema_id)
                 if schema_record:
                     try:
+                        # Преобразуем JSON-строку в объект, если необходимо
                         struct = schema_record.structure_json
-                        if isinstance(struct, str): struct = json.loads(struct)
-                        if isinstance(struct, str): struct = json.loads(struct)
+                        if isinstance(struct, str):
+                            struct = json.loads(struct)
+
+                        # Убедимся, что struct - это словарь
+                        if not isinstance(struct, dict):
+                            raise ValueError("Structure must be a dictionary")
+
                         pydantic_model = SchemaFactory.create_pydantic_model(schema_record.name, struct)
-                    except: pass
+                    except (json.JSONDecodeError, ValueError, TypeError) as e:
+                        print(f"Error creating pydantic model: {e}")
+                        pass
 
             processed_items_for_summary = []
 
