@@ -203,3 +203,58 @@ class ProcessingService:
                 "internal_thoughts": f"Произошла ошибка при создании отчета: {e}",
                 "next_action": "inform_error"
             }
+
+
+class ChatProcessingService:
+    def __init__(self):
+        self.llm = get_llm_provider()
+
+    async def process_user_message(self, user_message: str, chat_history: list, use_cache: bool = True, open_browser: bool = False):
+        """
+        Обрабатывает пользовательское сообщение и возвращает решение ИИ
+        без создания задачи поиска до подтверждения решения
+        """
+        # Импортируем здесь, чтобы избежать циклической зависимости
+        import importlib
+        llm_engine = importlib.import_module('llm_engine')
+
+        decision = await llm_engine.make_decision(user_message, chat_history)
+
+        return {
+            "decision": decision,
+            "type": decision.get("action", "chat"),
+            "message": decision.get("reply", "") if decision.get("action") == "chat" else decision.get("search_query", ""),
+            "reasoning": decision.get("reasoning", ""),
+            "internal_thoughts": decision.get("internal_thoughts", ""),
+            "plan": decision
+        }
+
+    async def create_search_task_if_confirmed(self, decision: dict, schema_id: int, chat_session_id: int,
+                                           limit: int = 5, open_in_browser: bool = False):
+        """
+        Создает задачу поиска только после подтверждения, что это действительно запрос поиска
+        """
+        if decision.get("action") == "search":
+            with Session(engine) as session:
+                task = SearchSession(
+                    query_text=decision.get("search_query") or "Товар",
+                    schema_id=schema_id,
+                    limit_count=decision.get("limit", limit),
+                    status="confirmed",  # Теперь создаем с подтвержденным статусом, чтобы расширение могло обработать задачу
+                    open_in_browser=open_browser,
+                    reasoning=decision.get("reasoning", ""),
+                    internal_thoughts=decision.get("internal_thoughts", "")
+                )
+                session.add(task)
+                session.commit()
+                session.refresh(task)
+
+                print(f"[SERVICE] Created Search Task #{task.id}")
+
+                return {
+                    "task_id": task.id,
+                    "query": task.query_text,
+                    "status": task.status
+                }
+
+        return None

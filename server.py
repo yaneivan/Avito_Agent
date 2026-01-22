@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from database import create_db_and_tables, engine, SearchSession, ExtractionSchema, Item, SearchItemLink, ChatSession, ChatMessage
-from services import ProcessingService
+from services import ProcessingService, ChatProcessingService
 from image_utils import save_base64_image
 from llm_engine import decide_action, generate_schema_structure, conduct_interview, conduct_interview_basic, generate_schema_proposal, generate_sql_query
 
@@ -42,6 +42,10 @@ class ChatSchemaAgreementRequest(BaseModel):
 class SqlGenerationRequest(BaseModel):
     search_id: int
     criteria: str
+
+class DeepResearchRequest(BaseModel):
+    history: List[Dict[str, Any]]
+    agreed_schema: Optional[str] = None  # Used when confirming schema agreement
 
 service = ProcessingService()
 templates = Jinja2Templates(directory="templates")
@@ -93,8 +97,16 @@ async def agent_chat(req: ChatRequest):
         session.add(user_message)
         session.commit()
 
-        schemas = session.exec(select(ExtractionSchema)).all()
-        decision = await decide_action(req.history, [s.name for s in schemas])
+        # Используем новый сервисный слой для обработки сообщения
+        chat_service = ChatProcessingService()
+        result = await chat_service.process_user_message(
+            user_message=req.history[-1]['content'],
+            chat_history=req.history,
+            use_cache=req.use_cache,
+            open_browser=req.open_browser
+        )
+
+        decision = result["decision"]
 
         if decision.get("action") == "chat":
             # Add assistant response to the chat session
@@ -165,35 +177,175 @@ async def agent_chat(req: ChatRequest):
                     }
 
             schema_name = decision.get("schema_name") or "General"
-            target_schema = next((s for s in schemas if s.name.lower() == schema_name.lower()), None)
+            target_schema = next((s for s in session.exec(select(ExtractionSchema)).all() if s.name.lower() == schema_name.lower()), None)
             if not target_schema:
                 new_struct_result = await generate_schema_structure(schema_name)
                 new_struct = new_struct_result["schema"]
                 target_schema = ExtractionSchema(name=schema_name, description="Auto", structure_json=new_struct)
                 session.add(target_schema); session.commit(); session.refresh(target_schema)
 
-            task = SearchSession(
-                query_text=query,
+            # Создаем задачу поиска только после подтверждения, что это действительно запрос поиска
+            task_info = await chat_service.create_search_task_if_confirmed(
+                decision=decision,
                 schema_id=target_schema.id,
-                limit_count=decision.get("limit", 5),
-                status="pending",
-                open_in_browser=req.open_browser,
-                reasoning=decision.get("reasoning", ""),
-                internal_thoughts=decision.get("internal_thoughts", "")
+                chat_session_id=chat_session.id,
+                limit=decision.get("limit", 5),
+                open_in_browser=req.open_browser
             )
-            session.add(task); session.commit(); session.refresh(task)
-            print(f"[API] Created Task #{task.id}")
+
+            if task_info:
+                # Add assistant response to the chat session
+                assistant_message = ChatMessage(
+                    role="assistant",
+                    content=f"Запускаю поиск",
+                    message_type="search_initiated",
+                    extra_metadata=json.dumps({
+                        "reasoning": decision.get("reasoning", ""),
+                        "internal_thoughts": decision.get("internal_thoughts", ""),
+                        "task_id": task_info["task_id"],
+                        "plan": decision
+                    }),
+                    chat_session_id=chat_session.id
+                )
+                session.add(assistant_message)
+                session.commit()
+
+                return {
+                    "type": "search",
+                    "message": f"Запускаю поиск",
+                    "task_id": task_info["task_id"],
+                    "plan": decision,
+                    "reasoning": decision.get("reasoning", ""),
+                    "internal_thoughts": decision.get("internal_thoughts", "")
+                }
+            else:
+                # Если задача не создана, возвращаем обычный ответ
+                assistant_message = ChatMessage(
+                    role="assistant",
+                    content=decision.get("reply", ""),
+                    message_type="chat_response",
+                    extra_metadata=json.dumps({
+                        "reasoning": decision.get("reasoning", ""),
+                        "internal_thoughts": decision.get("internal_thoughts", ""),
+                        "plan": decision
+                    }),
+                    chat_session_id=chat_session.id
+                )
+                session.add(assistant_message)
+                session.commit()
+
+                return {
+                    "type": "chat",
+                    "message": decision.get("reply"),
+                    "plan": decision,
+                    "reasoning": decision.get("reasoning", ""),
+                    "internal_thoughts": decision.get("internal_thoughts", "")
+                }
+    return {"type": "error", "message": "Ошибка"}
+
+# Обновим эндпоинт для глубокого исследования, чтобы он использовал ту же логику
+@app.post("/api/deep_research/chat")
+async def deep_research_chat(req: DeepResearchRequest):
+    print(f"\n[API] Deep Research Request: {req.history[-1]['content']}")
+
+    with Session(engine) as session:
+        # Find or create a deep research session
+        existing_session = session.exec(
+            select(SearchSession).where(
+                SearchSession.mode == "deep",
+                SearchSession.stage == "interview",
+                SearchSession.status == "created"
+            ).order_by(desc(SearchSession.created_at))
+        ).first()
+
+        if not existing_session:
+            # Create a new deep research session
+            new_session = SearchSession(
+                query_text=req.history[-1]['content'] if req.history else "Deep Research Query",
+                mode="deep",
+                stage="interview",
+                status="created",
+                limit_count=200  # Default for deep research
+            )
+            session.add(new_session)
+            session.commit()
+            session.refresh(new_session)
+            search_session = new_session
+        else:
+            search_session = existing_session
+
+        # Add user message to the associated chat session
+        chat_sessions = session.exec(
+            select(ChatSession).where(ChatSession.title.contains(str(search_session.id)))
+        ).all()
+        if chat_sessions:
+            chat_session = chat_sessions[0]
+        else:
+            chat_session = ChatSession(title=f"Deep Research Chat - {search_session.id}")
+            session.add(chat_session)
+            session.commit()
+            session.refresh(chat_session)
+
+        user_message = ChatMessage(
+            role="user",
+            content=req.history[-1]['content'],
+            message_type="user_request",
+            extra_metadata=json.dumps({"research_stage": search_session.stage}),
+            chat_session_id=chat_session.id
+        )
+        session.add(user_message)
+        session.commit()
+
+        # Process the message based on the current stage
+        if search_session.stage == "interview":
+            # Conduct interview to gather requirements
+            interview_result = await conduct_interview(req.history)
 
             # Add assistant response to the chat session
             assistant_message = ChatMessage(
                 role="assistant",
-                content=f"Запускаю поиск",
-                message_type="search_initiated",
+                content=interview_result.get("reply", ""),
+                message_type="interview_question",
                 extra_metadata=json.dumps({
-                    "reasoning": decision.get("reasoning", ""),
-                    "internal_thoughts": decision.get("internal_thoughts", ""),
-                    "task_id": task.id,
-                    "plan": decision
+                    "stage": "interview",
+                    "interview_data": interview_result.get("interview_data", {}),
+                    "needs_schema": interview_result.get("needs_schema", False)
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
+            # If interview is complete, move to schema agreement stage
+            if interview_result.get("complete"):
+                search_session.stage = "schema_agreement"
+                search_session.interview_data = json.dumps(interview_result.get("interview_data", {}))
+                session.add(search_session)
+                session.commit()
+
+            return {
+                "type": "interview",
+                "message": interview_result.get("reply", ""),
+                "stage": "interview",
+                "interview_data": interview_result.get("interview_data", {}),
+                "needs_schema": interview_result.get("needs_schema", False),
+                "complete": interview_result.get("complete", False)
+            }
+        elif search_session.stage == "schema_agreement":
+            # Handle schema agreement
+            schema_proposal = await generate_schema_proposal(
+                json.loads(search_session.interview_data) if search_session.interview_data else {}
+            )
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content=schema_proposal.get("reply", ""),
+                message_type="schema_proposal",
+                extra_metadata=json.dumps({
+                    "stage": "schema_agreement",
+                    "proposed_schema": schema_proposal.get("schema", {}),
+                    "sql_query": schema_proposal.get("sql_query", "")
                 }),
                 chat_session_id=chat_session.id
             )
@@ -201,14 +353,59 @@ async def agent_chat(req: ChatRequest):
             session.commit()
 
             return {
-                "type": "search",
-                "message": f"Запускаю поиск",
-                "task_id": task.id,
-                "plan": decision,
-                "reasoning": decision.get("reasoning", ""),
-                "internal_thoughts": decision.get("internal_thoughts", "")
+                "type": "schema_proposal",
+                "message": schema_proposal.get("reply", ""),
+                "stage": "schema_agreement",
+                "proposed_schema": schema_proposal.get("schema", {}),
+                "sql_query": schema_proposal.get("sql_query", "")
             }
-    return {"type": "error", "message": "Ошибка"}
+        elif search_session.stage == "parsing":
+            # This stage means the schema has been agreed upon and we're ready to parse
+            # Create the agreed schema in the database
+            schema_name = f"DeepResearch_{search_session.id}"
+            existing_schema = session.exec(
+                select(ExtractionSchema).where(ExtractionSchema.name == schema_name)
+            ).first()
+
+            if existing_schema:
+                existing_schema.structure_json = req.agreed_schema
+            else:
+                new_schema = ExtractionSchema(
+                    name=schema_name,
+                    description=f"Auto-generated schema for deep research session {search_session.id}",
+                    structure_json=req.agreed_schema
+                )
+                session.add(new_schema)
+
+            # Update session status to confirmed so extension can pick it up
+            search_session.schema_agreed = json.dumps(req.agreed_schema, ensure_ascii=False)
+            search_session.stage = "parsing"
+            search_session.status = "confirmed"  # Changed to "confirmed" so extension can pick it up
+
+            session.commit()
+
+            # Add assistant response to the chat session
+            assistant_message = ChatMessage(
+                role="assistant",
+                content="Начинаю парсинг данных",
+                message_type="parsing_started",
+                extra_metadata=json.dumps({
+                    "stage": "parsing",
+                    "task_id": search_session.id
+                }),
+                chat_session_id=chat_session.id
+            )
+            session.add(assistant_message)
+            session.commit()
+
+            return {
+                "type": "parsing",
+                "message": "Начинаю парсинг данных",
+                "stage": "parsing",
+                "task_id": search_session.id
+            }
+        else:
+            return {"type": "error", "message": "Invalid research stage"}
 
 @app.get("/api/searches/{search_id}/status")
 def get_search_status(search_id: int):
@@ -228,7 +425,9 @@ def get_search_status(search_id: int):
 @app.get("/api/get_task")
 def get_task():
     with Session(engine) as session:
-        task = session.exec(select(SearchSession).where(SearchSession.status == "pending").limit(1)).first()
+        # Теперь ищем задачи со статусом "confirmed", а не "pending" или "created"
+        # чтобы избежать преждевременной обработки задач, которые еще не подтверждены ИИ
+        task = session.exec(select(SearchSession).where(SearchSession.status == "confirmed").limit(1)).first()
         if task:
             task.status = "processing"
             session.add(task); session.commit()
@@ -371,7 +570,7 @@ async def deep_research_interview(req: InterviewRequest):
             select(SearchSession).where(
                 SearchSession.mode == "deep",
                 SearchSession.stage == "interview",
-                SearchSession.status == "pending"
+                SearchSession.status == "created"
             ).order_by(desc(SearchSession.created_at))
         ).first()
 
@@ -381,7 +580,7 @@ async def deep_research_interview(req: InterviewRequest):
                 query_text=req.history[-1]['content'] if req.history else "Deep Research Query",
                 mode="deep",
                 stage="interview",
-                status="pending",
+                status="created",
                 limit_count=200  # Default for deep research
             )
             session.add(new_session)
@@ -559,7 +758,7 @@ async def deep_research_schema_agreement(req: SchemaAgreementRequest):
         else:
             search_session.schema_agreed = req.agreed_schema
         search_session.stage = "parsing"
-        search_session.status = "pending"
+        search_session.status = "confirmed"  # Changed to "confirmed" so extension can pick it up
 
         # Create or update the extraction schema
         schema_name = f"DeepResearch_{search_session.id}"
@@ -684,7 +883,7 @@ async def deep_research_chat(req: InterviewRequest):
         existing_session = session.exec(
             select(SearchSession).where(
                 SearchSession.mode == "deep",
-                SearchSession.status.in_(["pending", "processing"])
+                SearchSession.status.in_(["created", "processing"])
             ).order_by(desc(SearchSession.created_at))
         ).first()
 
@@ -694,7 +893,7 @@ async def deep_research_chat(req: InterviewRequest):
                 query_text=req.history[-1]['content'] if req.history else "Deep Research Query",
                 mode="deep",
                 stage="interview",
-                status="pending",
+                status="created",
                 limit_count=200  # Default for deep research
             )
             session.add(new_session)

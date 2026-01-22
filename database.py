@@ -43,7 +43,7 @@ class ChatMessage(SQLModel, table=True):
 class SearchSession(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     query_text: str
-    status: str = Field(default="pending")  # General status (pending, processing, done, etc.)
+    status: str = Field(default="created")  # Changed default from "pending" to "created" to prevent premature processing
     mode: str = Field(default="quick")  # Mode: "quick" or "deep"
     stage: str = Field(default="interview")  # Stage for deep mode: "interview", "schema_agreement", "parsing", "analysis", "completed"
     created_at: datetime = Field(default_factory=datetime.now)
