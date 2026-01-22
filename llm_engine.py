@@ -223,11 +223,7 @@ async def conduct_interview(history: list) -> dict:
         return json.loads(content)
     except Exception as e:
         print(f"Interview error: {e}")
-        return {
-            "response": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
-            "needs_more_info": False,
-            "criteria_summary": "не определены"
-        }
+        raise ConnectionError("LLM is unavailable")
 
 async def generate_schema_proposal(criteria: str) -> str:
     """Generate a schema proposal based on gathered criteria"""

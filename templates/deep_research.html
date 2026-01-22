@@ -371,17 +371,23 @@
                     // Add bot response
                     addMsg('assistant', marked.parse(data.message), true);
                     deepHistory.push({role: "assistant", content: data.message});
-                    
+
                     // Store search ID
                     if (data.search_id) {
                         deepSearchId = data.search_id;
                     }
-                    
+
                     // Check if we can move to next stage
-                    if (!data.needs_more_info) {
+                    if (!data.needs_more_info && !data.error) {
                         setTimeout(() => {
                             generateAndShowSchemaProposal();
                         }, 1000);
+                    }
+                    // If there's an error (like LLM unavailable), don't proceed to next stage
+                    else if (data.error) {
+                        // Disable input to prevent further attempts
+                        inp.disabled = true;
+                        sendBtn.disabled = true;
                     }
                 }
             } catch (err) {

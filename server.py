@@ -171,7 +171,18 @@ async def deep_research_interview(req: InterviewRequest):
             search_session = existing_session
 
         # Conduct the interview using LLM
-        interview_response = await conduct_interview(req.history)
+        try:
+            interview_response = await conduct_interview(req.history)
+        except ConnectionError:
+            # LLM is unavailable, return error message and stop the process
+            return {
+                "type": "interview",
+                "message": "Нейросеть временно недоступна. Пожалуйста, повторите попытку позже.",
+                "needs_more_info": False,
+                "search_id": search_session.id,
+                "stage": search_session.stage,
+                "error": "llm_unavailable"
+            }
 
         # Update session with interview data if needed
         if search_session.interview_data:
