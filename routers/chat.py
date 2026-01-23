@@ -18,9 +18,7 @@ def get_all_chats(session: Session = Depends(get_session)):
 @router.post("/chats")
 def create_new_chat(session: Session = Depends(get_session)):
     new_chat = ChatSession(title="Новый чат")
-    session.add(new_chat)
-    session.commit()
-    session.refresh(new_chat)
+    session.add(new_chat); session.commit(); session.refresh(new_chat)
     return {"id": new_chat.id, "title": new_chat.title}
 
 @router.get("/chats/{chat_id}")
@@ -44,7 +42,7 @@ def add_message(chat_id: int, msg: ChatMessageSchema, session: Session = Depends
 @router.get("/searches/{search_id}/status")
 def get_search_status(search_id: int, session: Session = Depends(get_session)):
     s = session.get(SearchSession, search_id)
-    if not s: raise HTTPException(404)
+    if not s: return {"status": "not_found"}
     return {"status": s.status, "summary": s.summary}
 
 @router.get("/searches/{search_id}/items")
@@ -54,9 +52,8 @@ def get_search_items(search_id: int, session: Session = Depends(get_session)):
     for i in items:
         d = i.model_dump()
         if i.image_path:
-            clean_path = i.image_path.replace('\\', '/')
-            rel_path = clean_path.split('images/')[-1]
-            d["image_url"] = f"/images/{rel_path}"
+            p = i.image_path.replace('\\', '/')
+            d["image_url"] = f"/images/{p.split('images/')[-1]}"
         res.append(d)
     return res
 
@@ -73,9 +70,10 @@ async def agent_chat(req: ChatRequest, session: Session = Depends(get_session)):
         if not target_schema:
             try:
                 ns = await generate_schema_structure(schema_name)
-                target_schema = ExtractionSchema(name=schema_name, description="Auto", structure_json=json.dumps(ns["schema"]))
+                target_schema = ExtractionSchema(name=schema_name, description="Auto", structure_json=json.dumps(ns["schema"], ensure_ascii=False))
                 session.add(target_schema); session.commit(); session.refresh(target_schema)
-            except: target_schema = None
+            except: 
+                target_schema = None
 
         task = SearchSession(
             query_text=decision.get("search_query") or user_content,

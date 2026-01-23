@@ -11,24 +11,42 @@ service = ProcessingService()
 
 @router.get("/get_task")
 def get_task(session: Session = Depends(get_session)):
+    # Ищем подтвержденные задачи
     task = session.exec(select(SearchSession).where(SearchSession.status == "confirmed").limit(1)).first()
     if task:
+        print(f"\n[API] Extension picked up Task #{task.id}: {task.query_text}")
         task.status = "processing"
         session.add(task); session.commit()
-        return {"task_id": task.id, "query": task.query_text, "active_tab": task.open_in_browser, "limit": task.limit_count}
+        return {
+            "task_id": task.id, 
+            "query": task.query_text, 
+            "active_tab": task.open_in_browser, 
+            "limit": task.limit_count
+        }
     return {"task_id": None}
 
 @router.post("/submit_results")
 async def submit_results(data: SubmitData):
+    print(f"\n[API] Received {len(data.items)} items for Task #{data.task_id}")
     processed = []
+    
+    # Сначала сохраняем картинки, чтобы не держать base64 в памяти
     for idx, item in enumerate(data.items):
-        path = save_base64_image(item.image_base64, data.task_id, idx, item.url)
-        item.local_path = path; item.image_base64 = None
-        processed.append(item)
+        try:
+            path = save_base64_image(item.image_base64, data.task_id, idx, item.url)
+            item.local_path = path
+            item.image_base64 = None # Освобождаем память
+            processed.append(item)
+        except Exception as e:
+            print(f"[ERROR] Image save failed: {e}")
+            
+    # Запускаем тяжелую обработку
     await service.process_incoming_data(data.task_id, processed)
     return {"status": "ok"}
 
 @router.post("/log")
 def remote_log(log: LogMessage):
-    # Молча принимаем логи, чтобы не спамить в консоль
+    # Логи от расширения
+    if log.level == "error":
+        print(f"[EXT ERROR] {log.source}: {log.message}")
     return {"status": "ok"}
