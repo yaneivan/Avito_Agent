@@ -84,20 +84,106 @@ async def conduct_interview(history: list, interview_data: str = "") -> dict:
         print(f"[ERROR LLM] Interview: {e}")
         return {"response": "Что ищем и какой бюджет?", "needs_more_info": True, "criteria_summary": "", "reasoning": "error"}
 
-async def check_confirmation(user_input: str) -> bool:
-    print(f"[DEBUG LLM] Checking confirmation for: {user_input}")
-    prompt = f"Пользователь сказал: '{user_input}'. Это согласие (да, давай, ок, подтверждаю) или отказ/изменение? JSON: {{ 'confirmed': true/false }}"
+async def deep_research_agent(history: list, current_state: dict) -> dict:
+    """
+    Универсальный агент для глубокого исследования
+    current_state содержит информацию о текущем состоянии сессии
+    """
+    import json
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_schema",
+                "description": "Предложить схему извлечения данных на основе критериев пользователя",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "criteria": {"type": "string", "description": "Критерии поиска"}
+                    },
+                    "required": ["criteria"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "proceed_to_search",
+                "description": "Перейти к этапу поиска с указанной схемой",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "schema": {"type": "object", "description": "Схема извлечения данных"},
+                        "search_query": {"type": "string", "description": "Поисковый запрос"}
+                    },
+                    "required": ["schema", "search_query"]
+                }
+            }
+        }
+    ]
+
+    prompt = f"""
+    Ты — агент глубокого исследования для поиска товаров на Авито.
+
+    ТВОЯ ЗАДАЧА:
+    1. Понять, что ищет пользователь (товар и бюджет)
+    2. Если у тебя достаточно информации, предложи схему извлечения данных через инструмент propose_schema
+    3. Если пользователь согласен с предложенной схемой, используй инструмент proceed_to_search
+    4. Если пользователь не согласен с предложенной схемой или предлагает изменения,
+       ответь ему напрямую, уточни требования и при необходимости снова предложи схему
+    5. Если пользователь задает уточняющие вопросы, отвечай на них
+
+    ТЕКУЩЕЕ СОСТОЯНИЕ: {current_state}
+    ИСТОРИЯ ДИАЛОГА: {history[-10:]}
+
+    Выбери подходящий инструмент или ответь пользователю напрямую.
+    """
+
     try:
-        res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.1)
-        data = json.loads(clean_json(res.choices[0].message.content))
-        print(f"[DEBUG LLM] Confirmed: {data.get('confirmed')}")
-        return data.get("confirmed", False)
-    except: return False
+        response = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.3
+        )
+
+        # Проверяем, был ли вызван инструмент
+        if response.choices[0].finish_reason == "tool_calls":
+            # Возвращаем информацию о вызове инструмента
+            tool_calls = []
+            for tool_call in response.choices[0].message.tool_calls:
+                tool_calls.append({
+                    "name": tool_call.function.name,
+                    "arguments": json.loads(tool_call.function.arguments)
+                })
+
+            return {
+                "type": "tool_call",
+                "tool_calls": tool_calls,
+                "message": response.choices[0].message.content or ""
+            }
+        else:
+            # Простой текстовый ответ
+            return {
+                "type": "chat",
+                "message": response.choices[0].message.content,
+                "tool_calls": []
+            }
+    except Exception as e:
+        print(f"[ERROR LLM] Deep research agent: {e}")
+        return {
+            "type": "chat",
+            "message": "Произошла ошибка при обработке запроса.",
+            "tool_calls": []
+        }
+
 
 async def generate_schema_proposal(criteria: str) -> dict:
     print(f"[DEBUG LLM] Generating schema for: {criteria}")
     prompt = f"""Ты — аналитик данных. Твоя задача: создать исчерпывающую JSON-схему для извлечения характеристик товара: "{criteria}".
-    
+
 ТРЕБОВАНИЯ:
 1. Создай от 8 до 15 полей, которые реально важны для выбора этого товара.
 2. Включи технические характеристики (память, процессор, материал, размер).
@@ -117,7 +203,7 @@ async def generate_schema_proposal(criteria: str) -> dict:
 }}
 
 ОТВЕТЬ ТОЛЬКО JSON."""
-    
+
     try:
         res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.2)
         return json.loads(clean_json(res.choices[0].message.content))

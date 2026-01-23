@@ -164,6 +164,54 @@
                         body: JSON.stringify({role: 'assistant', content: msgText})
                     });
                 }
+            } else if (data.type === 'schema_proposal') {
+                // Обработка предложения схемы
+                let msgText = data.message;
+                addMsg('assistant', marked.parse(msgText), true);
+                deepHistory.push({role: "assistant", content: data.message});
+                if (data.search_id) deepSearchId = data.search_id;
+                if(currentChatId) {
+                     await fetch(`/api/chats/${currentChatId}/messages`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({role: 'assistant', content: data.message})
+                    });
+                }
+            } else if (data.type === 'search_started') {
+                // Обработка начала поиска
+                addMsg('assistant', data.message);
+                deepSearchId = data.search_id;
+                showStage('parsing');
+                if(currentChatId) {
+                     await fetch(`/api/chats/${currentChatId}/messages`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({role: 'assistant', content: data.message})
+                    });
+                }
+                startParsingPhase();
+            } else if (data.type === 'error') {
+                // Обработка ошибки
+                addMsg('assistant', `❌ ${data.message}`);
+                if(currentChatId) {
+                     await fetch(`/api/chats/${currentChatId}/messages`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({role: 'assistant', content: `❌ ${data.message}`})
+                    });
+                }
+            } else if (data.type === 'chat') {
+                // Обработка простого чат-ответа
+                addMsg('assistant', marked.parse(data.message), true);
+                deepHistory.push({role: "assistant", content: data.message});
+                if (data.search_id) deepSearchId = data.search_id;
+                if(currentChatId) {
+                     await fetch(`/api/chats/${currentChatId}/messages`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({role: 'assistant', content: data.message})
+                    });
+                }
             }
         } catch (err) {
             console.error(err);
