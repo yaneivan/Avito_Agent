@@ -91,6 +91,10 @@ async def deep_research_agent(history: list, current_state: dict) -> dict:
     """
     import json
 
+    print(f"\n[DEBUG AGENT] Starting deep research agent")
+    print(f"[DEBUG AGENT] Current state: {current_state}")
+    print(f"[DEBUG AGENT] History length: {len(history)}, Last message: {history[-1] if history else 'None'}")
+
     tools = [
         {
             "type": "function",
@@ -141,6 +145,7 @@ async def deep_research_agent(history: list, current_state: dict) -> dict:
     """
 
     try:
+        print(f"[DEBUG AGENT] Sending request to LLM with tools")
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
@@ -149,28 +154,42 @@ async def deep_research_agent(history: list, current_state: dict) -> dict:
             temperature=0.3
         )
 
+        print(f"[DEBUG AGENT] LLM response received")
+        print(f"[DEBUG AGENT] Finish reason: {response.choices[0].finish_reason}")
+        print(f"[DEBUG AGENT] Message content: {response.choices[0].message.content}")
+
         # Проверяем, был ли вызван инструмент
         if response.choices[0].finish_reason == "tool_calls":
+            print(f"[DEBUG AGENT] Tool calls detected")
             # Возвращаем информацию о вызове инструмента
             tool_calls = []
             for tool_call in response.choices[0].message.tool_calls:
+                print(f"[DEBUG AGENT] Processing tool call: {tool_call.function.name}")
+                print(f"[DEBUG AGENT] Tool arguments: {tool_call.function.arguments}")
+
                 tool_calls.append({
                     "name": tool_call.function.name,
                     "arguments": json.loads(tool_call.function.arguments)
                 })
 
-            return {
+            result = {
                 "type": "tool_call",
                 "tool_calls": tool_calls,
                 "message": response.choices[0].message.content or ""
             }
+
+            print(f"[DEBUG AGENT] Returning tool call result: {result}")
+            return result
         else:
-            # Простой текстовый ответ
-            return {
+            print(f"[DEBUG AGENT] Simple chat response detected")
+            result = {
                 "type": "chat",
                 "message": response.choices[0].message.content,
                 "tool_calls": []
             }
+
+            print(f"[DEBUG AGENT] Returning chat result: {result}")
+            return result
     except Exception as e:
         print(f"[ERROR LLM] Deep research agent: {e}")
         return {
