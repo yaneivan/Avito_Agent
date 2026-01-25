@@ -43,3 +43,8 @@ class ChatMessageSchema(BaseModel):
     content: str
     message_type: Optional[str] = "text"
     extra_metadata: Optional[str] = None
+
+class RelevanceEvaluation(BaseModel):
+    relevance_score: int
+    visual_notes: str
+    specs: dict = {}

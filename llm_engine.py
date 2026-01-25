@@ -230,22 +230,35 @@ async def generate_schema_proposal(criteria: str) -> dict:
         return {"schema": {"title": {"type": "str", "desc": "Название"}}, "reasoning": "fallback"}
 
 async def evaluate_relevance(title: str, desc: str, price: str, img_path: str, criteria: str) -> dict:
+    from schemas import RelevanceEvaluation
+    import json
+
     # print(f"[DEBUG LLM] Evaluating: {title}") # Слишком много спама, если включить
+    schema_description = json.dumps(RelevanceEvaluation.model_json_schema(), ensure_ascii=False, indent=2)
     prompt = f"""Оцени товар: "{title}", цена: {price}. Запрос: "{criteria}".
-1. relevance_score: 0 (совсем не то), 1 (плохо), 2 (норм), 3 (супер).
-2. visual_notes: опиши дефекты или состояние кратко.
-JSON: {{ 'relevance_score': int, 'visual_notes': str, 'specs': {{}} }}"""
-    
+Ты должен вернуть JSON-объект, строго соответствующий следующей схеме:
+{schema_description}"""
+
     msg = [{"type": "text", "text": prompt}]
     b64 = encode_image_to_base64(img_path)
     if b64: msg.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-    
+
     try:
-        res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": msg}], temperature=0.1)
-        return json.loads(clean_json(res.choices[0].message.content))
+        # Используем Structured Outputs для гарантии корректной структуры ответа
+        completion = await client.beta.chat.completions.parse(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": msg}],
+            response_format=RelevanceEvaluation,  # Передаем Pydantic-модель напрямую
+            temperature=0.1
+        )
+
+        # Возвращаем результат как словарь
+        return completion.choices[0].message.parsed.dict()
     except Exception as e:
         print(f"[ERROR LLM] Eval relevance: {e}")
-        return {"relevance_score": 1, "visual_notes": "Ошибка анализа", "specs": {}}
+        # Возвращаем валидный ответ по умолчанию
+        default_response = RelevanceEvaluation(relevance_score=1, visual_notes="Ошибка анализа", specs={})
+        return default_response.dict()
 
 async def rank_items_group(items_data: list, criteria: str) -> dict:
     print(f"[DEBUG LLM] Ranking group of {len(items_data)}")

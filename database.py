@@ -75,7 +75,7 @@ class Item(SQLModel, table=True):
     image_path: Optional[str] = None
     raw_json: str
     structured_data: Optional[str] = None
-    relevance_score: int
+    relevance_score: int = 0  # По умолчанию 0, будет обновлено после анализа
 
     searches: List[SearchSession] = Relationship(back_populates="items", link_model=SearchItemLink)
 
