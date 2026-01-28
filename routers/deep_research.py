@@ -15,17 +15,12 @@ processing_service = ProcessingService()
 
 def _get_or_create_search_session(db_session: Session, query: str) -> DeepResearchSession:
     """Получить или создать сессию глубокого исследования"""
-    s = db_session.exec(
-        select(DeepResearchSession).where(
-            DeepResearchSession.status == "created"
-        ).order_by(desc(DeepResearchSession.created_at))
-    ).first()
-    if not s:
-        print("[DEBUG ORCH] Creating new Deep Research Session")
-        s = DeepResearchSession(query_text=query, stage="interview", status="created", limit_count=10)
-        db_session.add(s)
-        db_session.commit()
-        db_session.refresh(s)
+    # Создаем новую сессию для каждого нового запроса
+    print("[DEBUG ORCH] Creating new Deep Research Session")
+    s = DeepResearchSession(query_text=query, stage="interview", status="created", limit_count=10)
+    db_session.add(s)
+    db_session.commit()
+    db_session.refresh(s)
     return s
 
 
@@ -75,7 +70,13 @@ async def deep_research_chat_endpoint(
 ):
     print(f"\n[API] Deep Research Chat received: {req.history[-1]['content'] if req.history else 'No content'}")
 
-    user_content = req.history[-1]['content'] if req.history else ""
+    # Ищем последнее сообщение пользователя в истории
+    user_content = ""
+    for msg in reversed(req.history):
+        if msg.get('role') == 'user':
+            user_content = msg.get('content', '')
+            break
+
     if not user_content:
         print("[WARNING] Received empty message")
         raise HTTPException(status_code=400, detail="Empty message")
