@@ -119,9 +119,39 @@
                 }
             } catch (e) { console.error(e); }
         } else {
-            const welcome = "Привет! Я помогу вам провести глубокий анализ рынка.";
-            addMsg('assistant', welcome);
-            deepHistory.push({role: "assistant", content: welcome});
+            // Если нет chat_id в URL, пытаемся получить его через создание новой сессии
+            try {
+                const welcome = "Привет! Я помогу вам провести глубокий анализ рынка.";
+                addMsg('assistant', welcome);
+                deepHistory.push({role: "assistant", content: welcome});
+
+                // Создаем новую сессию глубокого исследования
+                const res = await fetch('/api/deep_research/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        history: deepHistory,
+                        current_state: {}
+                    })
+                });
+                const data = await res.json();
+                if (data.research_id) {
+                    deepResearchId = data.research_id;
+
+                    // Получаем чат, связанный с этой сессией
+                    const chatRes = await fetch(`/api/deep_research/get_chat_by_research/${deepResearchId}`);
+                    if (chatRes.ok) {
+                        const chatData = await chatRes.json();
+                        currentChatId = chatData.chat_id;
+                        window.history.pushState({}, '', `?chat_id=${currentChatId}`);
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                const welcome = "Привет! Я помогу вам провести глубокий анализ рынка.";
+                addMsg('assistant', welcome);
+                deepHistory.push({role: "assistant", content: welcome});
+            }
         }
     }
 
@@ -133,16 +163,24 @@
         addMsg('user', txt);
         deepHistory.push({role: "user", content: txt});
 
-        if (!currentChatId) {
+        // В режиме глубокого исследования не создаем обычный чат,
+        // а используем чат, связанный с DeepResearchSession
+        if (!currentChatId && deepResearchId) {
+            // Получаем чат, связанный с DeepResearchSession
             try {
-                const cRes = await fetch('/api/chats', { method: 'POST' });
-                const cData = await cRes.json();
-                currentChatId = cData.id;
-                window.history.pushState({}, '', `?chat_id=${currentChatId}`);
+                const res = await fetch(`/api/deep_research/get_chat_by_research/${deepResearchId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    currentChatId = data.chat_id;
+                    window.history.pushState({}, '', `?chat_id=${currentChatId}`);
+                }
             } catch(e) { console.error(e); }
         }
+        // Не создаем обычный чат в режиме глубокого исследования
 
-        if (currentChatId) {
+        // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+        // так как они уже сохраняются в чат, связанный с DeepResearchSession
+        if (currentChatId && !deepResearchId) {
             await fetch(`/api/chats/${currentChatId}/messages`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -162,7 +200,9 @@
                 addMsg('assistant', data.message);
                 deepResearchId = data.research_id;
                 showStage('parsing');
-                if(currentChatId) {
+                // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+                // так как они уже сохраняются в чат, связанный с DeepResearchSession
+                if(currentChatId && !deepResearchId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -180,7 +220,9 @@
                 addMsg('assistant', marked.parse(msgText), true);
                 deepHistory.push({role: "assistant", content: msgText});
                 if (data.research_id) deepResearchId = data.research_id;
-                if(currentChatId) {
+                // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+                // так как они уже сохраняются в чат, связанный с DeepResearchSession
+                if(currentChatId && !deepResearchId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -193,7 +235,9 @@
                 addMsg('assistant', marked.parse(msgText), true);
                 deepHistory.push({role: "assistant", content: data.message});
                 if (data.research_id) deepResearchId = data.research_id;
-                if(currentChatId) {
+                // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+                // так как они уже сохраняются в чат, связанный с DeepResearchSession
+                if(currentChatId && !deepResearchId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -205,7 +249,9 @@
                 addMsg('assistant', data.message);
                 deepResearchId = data.research_id;
                 showStage('parsing');
-                if(currentChatId) {
+                // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+                // так как они уже сохраняются в чат, связанный с DeepResearchSession
+                if(currentChatId && !deepResearchId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -216,7 +262,9 @@
             } else if (data.type === 'error') {
                 // Обработка ошибки
                 addMsg('assistant', `❌ ${data.message}`);
-                if(currentChatId) {
+                // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+                // так как они уже сохраняются в чат, связанный с DeepResearchSession
+                if(currentChatId && !deepResearchId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -228,7 +276,9 @@
                 addMsg('assistant', marked.parse(data.message), true);
                 deepHistory.push({role: "assistant", content: data.message});
                 if (data.research_id) deepResearchId = data.research_id;
-                if(currentChatId) {
+                // В режиме глубокого исследования не сохраняем сообщения в обычный чат,
+                // так как они уже сохраняются в чат, связанный с DeepResearchSession
+                if(currentChatId && !deepResearchId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},

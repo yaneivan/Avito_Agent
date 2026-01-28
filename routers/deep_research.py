@@ -265,6 +265,15 @@ def get_research_status(research_id: int, session: Session = Depends(get_session
         "summary": research_session.summary
     }
 
+@router.get("/get_chat_by_research/{research_id}")
+def get_chat_by_research_id(research_id: int, session: Session = Depends(get_session)):
+    research_session = session.get(DeepResearchSession, research_id)
+    if not research_session or not research_session.chat_session_id:
+        raise HTTPException(status_code=404, detail="Research session or chat not found")
+
+    return {"chat_id": research_session.chat_session_id}
+
+
 @router.get("/items/{research_id}")
 def get_research_items(research_id: int, session: Session = Depends(get_session)):
     # Получаем элементы, связанные с сессией глубокого исследования

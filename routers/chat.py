@@ -32,6 +32,23 @@ def get_deep_research_chats(session: Session = Depends(get_session)):
     ).all()
     return [{"id": c.id, "title": c.title, "created_at": c.created_at} for c in chats]
 
+@router.get("/chats/{chat_id}/deep_research_session")
+def get_deep_research_session_by_chat_id(chat_id: int, session: Session = Depends(get_session)):
+    # Получаем DeepResearchSession по chat_id
+    research_session = session.exec(
+        select(DeepResearchSession)
+        .where(DeepResearchSession.chat_session_id == chat_id)
+    ).first()
+
+    if research_session:
+        return {
+            "id": research_session.id,
+            "query_text": research_session.query_text,
+            "stage": research_session.stage,
+            "status": research_session.status
+        }
+    return None
+
 @router.post("/chats")
 def create_new_chat(session: Session = Depends(get_session)):
     new_chat = ChatSession(title="Новый чат")
