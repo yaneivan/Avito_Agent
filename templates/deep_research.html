@@ -105,13 +105,29 @@
                             const statusRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
                             if (statusRes.ok) {
                                 const statusData = await statusRes.json();
-                                if (statusData.status === 'completed' && statusData.summary) {
+
+                                // Если сессия завершена, показываем результаты
+                                if (statusData.status === 'completed') {
                                     showStage('results');
-                                    analysisSummary.innerHTML = marked.parse(statusData.summary);
+
+                                    if (statusData.summary) {
+                                        analysisSummary.innerHTML = marked.parse(statusData.summary);
+                                    }
 
                                     const itemsRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
-                                    const items = await itemsRes.json();
-                                    renderTopItemsGrid(items);
+                                    if (itemsRes.ok) {
+                                        const items = await itemsRes.json();
+                                        renderTopItemsGrid(items);
+                                    }
+                                } else {
+                                    // Если сессия не завершена, проверяем текущую стадию
+                                    if (statusData.stage === 'parsing') {
+                                        showStage('parsing');
+                                    } else if (statusData.stage === 'results') {
+                                        showStage('results');
+                                    } else {
+                                        showStage('interview');
+                                    }
                                 }
                             }
                         }
