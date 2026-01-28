@@ -27,6 +27,31 @@
         chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
     }
 
+    // Загрузка существующего чата по chat_id из URL
+    async function loadExistingChat() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const chatIdParam = urlParams.get('chat_id');
+        if (chatIdParam) {
+            currentChatId = chatIdParam;
+            try {
+                const res = await fetch(`/api/chats/${currentChatId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    chat.innerHTML = '';
+                    history = [];
+                    data.messages.forEach(msg => {
+                        if (msg.role !== 'system') {
+                            addMsg(msg.role, marked.parse(msg.content), true);
+                            history.push({role: msg.role, content: msg.content});
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Ошибка загрузки чата:', e);
+            }
+        }
+    }
+
     inp.addEventListener('keypress', async (e) => {
         if (e.key === 'Enter' && inp.value.trim()) {
             const txt = inp.value; inp.value = ''; inp.disabled = true;
@@ -34,11 +59,13 @@
             if (!currentChatId) {
                 const c = await fetch('/api/chats', {method: 'POST'});
                 const d = await c.json(); currentChatId = d.id;
+                // Обновляем URL с chat_id
+                window.history.pushState({}, '', `?chat_id=${currentChatId}`);
             }
             const res = await fetch('/api/agent/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({history})});
             const data = await res.json();
             if (data.type === 'search') {
-                addMsg('bot', '🚀 ' + data.message); taskId = data.task_id; 
+                addMsg('bot', '🚀 ' + data.message); taskId = data.task_id;
                 grid.innerHTML = ''; statusBar.style.display = 'block'; summaryDisplayed = false;
                 startPolling();
             } else {
@@ -54,7 +81,7 @@
         pollTimer = setInterval(async () => {
             const sRes = await fetch(`/api/searches/${taskId}/status`), sData = await sRes.json();
             statusBar.querySelector('span').innerText = sData.status;
-            
+
             const iRes = await fetch(`/api/searches/${taskId}/items`), items = await iRes.json();
             if (items.length > 0) renderGrid(items); // Показываем сразу!
 
@@ -76,5 +103,8 @@
                 </div>
             </div>`).join('');
     }
+
+    // Загружаем существующий чат при инициализации
+    loadExistingChat();
 </script>
 {% endblock %}

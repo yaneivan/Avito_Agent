@@ -21,37 +21,54 @@
 <script>
     async function loadChatHistory() {
         try {
-            const response = await fetch('/api/chats');
-            const chats = await response.json();
-            
+            // Загружаем обычные чаты и чаты глубокого исследования
+            const [regularChatsResponse, deepChatsResponse] = await Promise.allSettled([
+                fetch('/api/chats'),
+                fetch('/api/deep_research_chats')
+            ]);
+
+            let regularChats = [];
+            let deepChats = [];
+
+            if (regularChatsResponse.status === 'fulfilled') {
+                regularChats = await regularChatsResponse.value.json();
+            }
+
+            if (deepChatsResponse.status === 'fulfilled') {
+                deepChats = await deepChatsResponse.value.json();
+            }
+
+            // Объединяем чаты, помечая их тип
+            const allChats = [
+                ...regularChats.map(chat => ({...chat, isDeepResearch: false})),
+                ...deepChats.map(chat => ({...chat, isDeepResearch: true}))
+            ];
+
+            // Сортируем по дате создания (новые сверху)
+            allChats.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
             const container = document.getElementById('chat-history-container');
             const noChatsMessage = document.getElementById('no-chats-message');
-            
-            if (chats.length === 0) {
+
+            if (allChats.length === 0) {
                 container.style.display = 'none';
                 noChatsMessage.style.display = 'block';
                 return;
             }
-            
-            container.innerHTML = '';
-            
-            chats.forEach(chat => {
-                let chatType = 'Поиск';
-                let chatTypeColor = '#4CAF50';
-                let link = `/?chat_id=${chat.id}`;
 
-                if (chat.title && (chat.title.includes('Deep Research') || chat.title.includes('Глубок'))) {
-                    chatType = 'Deep Research';
-                    chatTypeColor = '#2196F3';
-                    link = `/deep_research?chat_id=${chat.id}`;
-                }
-                
+            container.innerHTML = '';
+
+            allChats.forEach(chat => {
+                let chatType = chat.isDeepResearch ? 'Deep Research' : 'Поиск';
+                let chatTypeColor = chat.isDeepResearch ? '#2196F3' : '#4CAF50';
+                let link = chat.isDeepResearch ? `/deep_research?chat_id=${chat.id}` : `/?chat_id=${chat.id}`;
+
                 const chatCard = document.createElement('div');
                 chatCard.className = `card bg-dark text-white h-100 shadow-sm`;
                 chatCard.style.cursor = 'pointer';
                 chatCard.style.border = '1px solid #333';
                 chatCard.style.transition = 'transform 0.2s';
-                
+
                 chatCard.innerHTML = `
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
@@ -64,18 +81,18 @@
                         </p>
                     </div>
                 `;
-                
+
                 chatCard.onclick = () => {
                     window.location.href = link;
                 };
-                
+
                 container.appendChild(chatCard);
             });
         } catch (error) {
             console.error('Ошибка:', error);
         }
     }
-    
+
     window.onload = loadChatHistory;
 </script>
 {% endblock %}

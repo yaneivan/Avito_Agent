@@ -7,7 +7,7 @@ templates = Jinja2Templates(directory="templates")
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("search_interface.html", {"request": request})
 
 @router.get("/deep_research", response_class=HTMLResponse)
 async def deep_research_view(request: Request):

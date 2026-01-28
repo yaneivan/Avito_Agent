@@ -12,7 +12,24 @@ router = APIRouter(prefix="/api", tags=["chat"])
 
 @router.get("/chats")
 def get_all_chats(session: Session = Depends(get_session)):
-    chats = session.exec(select(ChatSession).order_by(desc(ChatSession.updated_at))).all()
+    # Возвращаем только чаты, которые не связаны с DeepResearchSession
+    # Это позволяет отделить обычные чаты от чатов глубокого исследования
+    # Используем left join и фильтруем по NULL в связанной сессии
+    chats = session.exec(
+        select(ChatSession)
+        .where(~ChatSession.deep_research_session.has())
+        .order_by(desc(ChatSession.updated_at))
+    ).all()
+    return [{"id": c.id, "title": c.title, "created_at": c.created_at} for c in chats]
+
+@router.get("/deep_research_chats")
+def get_deep_research_chats(session: Session = Depends(get_session)):
+    # Возвращаем только чаты, которые связаны с DeepResearchSession
+    chats = session.exec(
+        select(ChatSession)
+        .where(ChatSession.deep_research_session.has())
+        .order_by(desc(ChatSession.updated_at))
+    ).all()
     return [{"id": c.id, "title": c.title, "created_at": c.created_at} for c in chats]
 
 @router.post("/chats")
