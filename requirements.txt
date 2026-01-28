@@ -1,10 +1,7 @@
 fastapi
 uvicorn
 sqlmodel
-aiogram
 python-dotenv
-pandas
-streamlit
 requests
 openai
 aiofiles
