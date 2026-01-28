@@ -17,6 +17,7 @@ class ExtractionSchema(SQLModel, table=True):
     description: str
     structure_json: str
     searches: List["SearchSession"] = Relationship(back_populates="schema_model")
+    deep_research_sessions: List["DeepResearchSession"] = Relationship(back_populates="schema_model")
 
 class ChatSession(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -26,6 +27,9 @@ class ChatSession(SQLModel, table=True):
 
     # Relationship to chat messages
     messages: List["ChatMessage"] = Relationship(back_populates="chat_session", cascade_delete=True)
+
+    # Relationship to deep research session (one-to-one)
+    deep_research_session: Optional["DeepResearchSession"] = Relationship(back_populates="chat_session")
 
 class ChatMessage(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -40,12 +44,44 @@ class ChatMessage(SQLModel, table=True):
     # Additional metadata (optional)
     extra_metadata: Optional[str] = None  # JSON string for additional data
 
+class DeepResearchSession(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    query_text: str
+    status: str = Field(default="created")  # Status: "created", "interview", "parsing", "analysis", "completed"
+    stage: str = Field(default="interview")  # Stage: "interview", "schema_agreement", "parsing", "analysis", "completed"
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    # Настройки
+    limit_count: int = Field(default=int(os.getenv("DEFAULT_LIMIT_COUNT", "20")))
+    open_in_browser: bool = Field(default=True)
+    use_cache: bool = Field(default=False)
+
+    # Результат анализа
+    summary: Optional[str] = None  # Сводка результатов
+    reasoning: Optional[str] = None  # Объяснение решения LLM
+    internal_thoughts: Optional[str] = None  # Внутренние размышления LLM
+    interview_data: Optional[str] = None  # JSON string storing interview responses
+    schema_agreed: Optional[str] = None  # JSON string storing agreed schema
+    analysis_result: Optional[str] = None  # Analysis result for deep research
+
+    schema_id: Optional[int] = Field(default=None, foreign_key="extractionschema.id")
+    schema_model: Optional[ExtractionSchema] = Relationship(back_populates="deep_research_sessions")
+
+    # Связь с чатом
+    chat_session_id: Optional[int] = Field(default=None, foreign_key="chatsession.id")
+    chat_session: Optional[ChatSession] = Relationship(back_populates="deep_research_session")
+
+    # Связь с поисковыми сессиями (для поисков, созданных в рамках глубокого исследования)
+    search_sessions: List["SearchSession"] = Relationship(back_populates="deep_research_session")
+
+
 class SearchSession(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     query_text: str
     status: str = Field(default="created")  # Changed default from "pending" to "created" to prevent premature processing
-    mode: str = Field(default="quick")  # Mode: "quick" or "deep"
-    stage: str = Field(default="interview")  # Stage for deep mode: "interview", "schema_agreement", "parsing", "analysis", "completed"
+    mode: str = Field(default="quick")  # Mode: "quick" - для простых поисков
+    stage: str = Field(default="parsing")  # Stage for quick mode: "parsing", "completed"
     created_at: datetime = Field(default_factory=datetime.now)
 
     # Настройки
@@ -57,9 +93,11 @@ class SearchSession(SQLModel, table=True):
     summary: Optional[str] = None # <-- НОВОЕ ПОЛЕ
     reasoning: Optional[str] = None  # Объяснение решения LLM
     internal_thoughts: Optional[str] = None  # Внутренние размышления LLM
-    interview_data: Optional[str] = None  # JSON string storing interview responses
-    schema_agreed: Optional[str] = None  # JSON string storing agreed schema
-    analysis_result: Optional[str] = None  # Analysis result for deep research
+    analysis_result: Optional[str] = None  # Analysis result for quick search
+
+    # Связь с глубоким исследованием (для поисков, созданных в рамках глубокого исследования)
+    deep_research_session_id: Optional[int] = Field(default=None, foreign_key="deepresearchsession.id")
+    deep_research_session: Optional["DeepResearchSession"] = Relationship(back_populates="search_sessions")
 
     schema_id: Optional[int] = Field(default=None, foreign_key="extractionschema.id")
     schema_model: Optional[ExtractionSchema] = Relationship(back_populates="searches")
@@ -79,6 +117,8 @@ class Item(SQLModel, table=True):
     visual_notes: Optional[str] = None  # Описание визуального состояния товара
 
     searches: List[SearchSession] = Relationship(back_populates="items", link_model=SearchItemLink)
+    # Удаляем двойную ссылку через SearchItemLink, так как она создает конфликт
+    # Связь с DeepResearchSession осуществляется через SearchSession
 
 sqlite_file_name = os.getenv("DATABASE_FILE_NAME", "database.db")
 sqlite_url = f"sqlite:///{sqlite_file_name}"

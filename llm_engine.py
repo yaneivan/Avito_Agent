@@ -165,7 +165,14 @@ async def deep_research_agent(history: list, current_state: dict) -> dict:
             tool_calls = []
             for tool_call in response.choices[0].message.tool_calls:
                 print(f"[DEBUG AGENT] Processing tool call: {tool_call.function.name}")
-                print(f"[DEBUG AGENT] Tool arguments: {tool_call.function.arguments}")
+                # Выводим только краткую информацию об аргументах, без длинных значений
+                import json
+                try:
+                    args_dict = json.loads(tool_call.function.arguments)
+                    args_summary = {k: (f"<{type(v).__name__}>" if isinstance(v, (dict, list)) else v) for k, v in args_dict.items()}
+                    print(f"[DEBUG AGENT] Tool arguments (summary): {args_summary}")
+                except json.JSONDecodeError:
+                    print(f"[DEBUG AGENT] Tool arguments: <could not parse>")
 
                 tool_calls.append({
                     "name": tool_call.function.name,
@@ -178,7 +185,9 @@ async def deep_research_agent(history: list, current_state: dict) -> dict:
                 "message": response.choices[0].message.content or ""
             }
 
-            print(f"[DEBUG AGENT] Returning tool call result: {result}")
+            # Выводим только краткую информацию о результатах
+            tool_calls_summary = [{"name": tc["name"], "args_keys": list(tc["arguments"].keys())} for tc in result.get("tool_calls", [])]
+            print(f"[DEBUG AGENT] Returning tool call result: {{'type': '{result['type']}', 'tool_calls_count': {len(result.get('tool_calls', []))}, 'tool_calls': {tool_calls_summary}}}")
             return result
         else:
             print(f"[DEBUG AGENT] Simple chat response detected")
@@ -229,15 +238,70 @@ async def generate_schema_proposal(criteria: str) -> dict:
     except:
         return {"schema": {"title": {"type": "str", "desc": "Название"}}, "reasoning": "fallback"}
 
-async def evaluate_relevance(title: str, desc: str, price: str, img_path: str, criteria: str) -> dict:
+async def extract_product_features(title: str, desc: str, price: str, img_path: str, criteria: str, extraction_schema: dict = None) -> dict:
+    """
+    Анализирует товар и извлекает структурированные характеристики согласно утвержденной схеме.
+
+    Args:
+        title (str): Название товара
+        desc (str): Описание товара
+        price (str): Цена товара
+        img_path (str): Путь к изображению товара
+        criteria (str): Критерии поиска/запрос пользователя
+        extraction_schema (dict, optional): Утвержденная схема извлечения данных.
+                                          Если не указана, извлекаются общие характеристики.
+
+    Returns:
+        dict: Словарь с результатами, содержащий:
+            - relevance_score (int): Оценка релевантности товара запросу
+            - visual_notes (str): Комментарии по визуальному анализу
+            - specs (dict): Извлеченные структурированные характеристики
+    """
     from schemas import RelevanceEvaluation
+    from pydantic import create_model
     import json
 
-    # print(f"[DEBUG LLM] Evaluating: {title}") # Слишком много спама, если включить
-    schema_description = json.dumps(RelevanceEvaluation.model_json_schema(), ensure_ascii=False, indent=2)
-    prompt = f"""Оцени товар: "{title}", цена: {price}. Запрос: "{criteria}".
-Ты должен вернуть JSON-объект, строго соответствующий следующей схеме:
+    # Если передана схема извлечения, создаем динамическую модель
+    if extraction_schema:
+        # Создаем динамические поля на основе схемы
+        dynamic_fields = {}
+        for field_name, field_info in extraction_schema.items():
+            field_type = field_info.get("type", "str")
+            # Преобразуем строковые типы в соответствующие Python-типы
+            if field_type == "int":
+                pydantic_type = (int, ...)
+            elif field_type == "float":
+                pydantic_type = (float, ...)
+            elif field_type == "bool":
+                pydantic_type = (bool, ...)
+            else:  # по умолчанию str
+                pydantic_type = (str, ...)
+
+            dynamic_fields[field_name] = pydantic_type
+
+        # Создаем динамическую модель, наследуясь от RelevanceEvaluation
+        DynamicEvaluation = create_model(
+            'DynamicEvaluation',
+            relevance_score=(int, ...),
+            visual_notes=(str, ...),
+            specs=(dict, ...),
+            **dynamic_fields
+        )
+
+        # Формируем промпт с учетом схемы
+        schema_info = f"Требуется извлечь следующие характеристики: {list(extraction_schema.keys())}. "
+        schema_description = json.dumps(DynamicEvaluation.model_json_schema(), ensure_ascii=False, indent=2)
+        prompt = f"""Оцени товар: "{title}", цена: {price}. Запрос: "{criteria}".
+{schema_info}Ты должен вернуть JSON-объект, строго соответствующий следующей схеме:
 {schema_description}"""
+    else:
+        # Если схема не передана, используем базовую модель
+        schema_info = ""
+        schema_description = json.dumps(RelevanceEvaluation.model_json_schema(), ensure_ascii=False, indent=2)
+        prompt = f"""Оцени товар: "{title}", цена: {price}. Запрос: "{criteria}".
+{schema_info}Ты должен вернуть JSON-объект, строго соответствующий следующей схеме:
+{schema_description}"""
+        DynamicEvaluation = RelevanceEvaluation
 
     msg = [{"type": "text", "text": prompt}]
     b64 = encode_image_to_base64(img_path)
@@ -248,14 +312,28 @@ async def evaluate_relevance(title: str, desc: str, price: str, img_path: str, c
         completion = await client.beta.chat.completions.parse(
             model=MODEL_NAME,
             messages=[{"role": "user", "content": msg}],
-            response_format=RelevanceEvaluation,  # Передаем Pydantic-модель напрямую
+            response_format=DynamicEvaluation,  # Передаем динамическую модель
             temperature=0.1
         )
 
         # Возвращаем результат как словарь
-        return completion.choices[0].message.parsed.dict()
+        result = completion.choices[0].message.parsed.dict()
+
+        # Если использовалась динамическая модель, перемещаем извлеченные поля в specs
+        if extraction_schema and DynamicEvaluation != RelevanceEvaluation:
+            extracted_values = {}
+            for field_name in extraction_schema.keys():
+                if field_name in result:
+                    extracted_values[field_name] = result[field_name]
+                    # Удаляем поле из результата, чтобы не дублировать
+                    del result[field_name]
+
+            # Обновляем поле specs с извлеченными значениями
+            result["specs"] = extracted_values
+
+        return result
     except Exception as e:
-        print(f"[ERROR LLM] Eval relevance: {e}")
+        print(f"[ERROR LLM] Extract product features: {e}")
         # Возвращаем валидный ответ по умолчанию
         default_response = RelevanceEvaluation(relevance_score=1, visual_notes="Ошибка анализа", specs={})
         return default_response.dict()

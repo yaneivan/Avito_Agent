@@ -40,8 +40,8 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
-    let currentStage = 'interview'; 
-    let deepSearchId = null;
+    let currentStage = 'interview';
+    let deepResearchId = null;
     let deepHistory = [];
     let currentChatId = null;
 
@@ -93,6 +93,29 @@
                             deepHistory.push({role: msg.role, content: msg.content});
                         }
                     });
+
+                    // Попробуем получить связанную сессию глубокого исследования
+                    const researchRes = await fetch(`/api/chats/${currentChatId}/deep_research_session`);
+                    if (researchRes.ok) {
+                        const researchData = await researchRes.json();
+                        if (researchData && researchData.id) {
+                            deepResearchId = researchData.id;
+
+                            // Проверим статус сессии и покажем результаты, если они готовы
+                            const statusRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
+                            if (statusRes.ok) {
+                                const statusData = await statusRes.json();
+                                if (statusData.status === 'completed' && statusData.summary) {
+                                    showStage('results');
+                                    analysisSummary.innerHTML = marked.parse(statusData.summary);
+
+                                    const itemsRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
+                                    const items = await itemsRes.json();
+                                    renderTopItemsGrid(items);
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (e) { console.error(e); }
         } else {
@@ -137,7 +160,7 @@
 
             if (data.type === 'schema_confirmed') {
                 addMsg('assistant', data.message);
-                deepSearchId = data.search_id;
+                deepResearchId = data.research_id;
                 showStage('parsing');
                 if(currentChatId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
@@ -156,7 +179,7 @@
                 }
                 addMsg('assistant', marked.parse(msgText), true);
                 deepHistory.push({role: "assistant", content: msgText});
-                if (data.search_id) deepSearchId = data.search_id;
+                if (data.research_id) deepResearchId = data.research_id;
                 if(currentChatId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
@@ -169,7 +192,7 @@
                 let msgText = data.message;
                 addMsg('assistant', marked.parse(msgText), true);
                 deepHistory.push({role: "assistant", content: data.message});
-                if (data.search_id) deepSearchId = data.search_id;
+                if (data.research_id) deepResearchId = data.research_id;
                 if(currentChatId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
@@ -180,7 +203,7 @@
             } else if (data.type === 'search_started') {
                 // Обработка начала поиска
                 addMsg('assistant', data.message);
-                deepSearchId = data.search_id;
+                deepResearchId = data.research_id;
                 showStage('parsing');
                 if(currentChatId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
@@ -204,7 +227,7 @@
                 // Обработка простого чат-ответа
                 addMsg('assistant', marked.parse(data.message), true);
                 deepHistory.push({role: "assistant", content: data.message});
-                if (data.search_id) deepSearchId = data.search_id;
+                if (data.research_id) deepResearchId = data.research_id;
                 if(currentChatId) {
                      await fetch(`/api/chats/${currentChatId}/messages`, {
                         method: 'POST',
@@ -222,15 +245,15 @@
 
     sendBtn.addEventListener('click', sendMessage);
     inp.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
-    
+
     skipParsingBtn.addEventListener('click', () => {
         showStage('results');
-        if (deepSearchId) fetchAnalysisResults();
+        if (deepResearchId) fetchAnalysisResults();
     });
 
     async function startParsingPhase() {
         try {
-            await fetch(`/api/deep_research/start_parsing?search_id=${deepSearchId}`, {method: 'POST'});
+            await fetch(`/api/deep_research/start_parsing?research_id=${deepResearchId}`, {method: 'POST'});
             setTimeout(() => {
                 showStage('results');
                 fetchAnalysisResults();
@@ -240,11 +263,11 @@
 
     async function fetchAnalysisResults() {
         try {
-            await fetch(`/api/deep_research/execute_analysis?search_id=${deepSearchId}`, {method: 'POST'});
-            const sRes = await fetch(`/api/searches/${deepSearchId}/status`);
+            await fetch(`/api/deep_research/execute_analysis?research_id=${deepResearchId}`, {method: 'POST'});
+            const sRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
             const sData = await sRes.json();
             analysisSummary.innerHTML = marked.parse(sData.summary || "Анализ...");
-            const iRes = await fetch(`/api/searches/${deepSearchId}/items`);
+            const iRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
             const items = await iRes.json();
             renderTopItemsGrid(items);
         } catch (e) { console.error(e); }
@@ -252,15 +275,17 @@
 
     function renderTopItemsGrid(items) {
         if (!items.length) { topItemsGrid.innerHTML = 'Нет данных'; return; }
-        topItemsGrid.innerHTML = items.map(item => `
-            <div class="card" style="background:#222; border:1px solid #444; overflow: hidden; border-radius: 8px;">
-                 <img src="${item.image_url || ''}" style="width:100%; height:150px; object-fit:cover;">
-                 <div style="padding:10px;">
-                    <div style="color:#4CAF50; font-weight:bold">${item.price}</div>
-                    <div style="font-size: 0.9rem;"><a href="${item.url}" target="_blank" style="color:#eee; text-decoration: none;">${item.title}</a></div>
-                 </div>
-            </div>
-        `).join('');
+        let html = '';
+        for (const item of items) {
+            html += '<div class="card" style="background:#222; border:1px solid #444; overflow: hidden; border-radius: 8px;">' +
+                    '<img src="' + (item.image_url || '') + '" style="width:100%; height:150px; object-fit:cover;">' +
+                    '<div style="padding:10px;">' +
+                    '<div style="color:#4CAF50; font-weight:bold">' + item.price + '</div>' +
+                    '<div style="font-size: 0.9rem;"><a href="' + item.url + '" target="_blank" style="color:#eee; text-decoration: none;">' + item.title + '</a></div>' +
+                    '</div>' +
+                    '</div>';
+        }
+        topItemsGrid.innerHTML = html;
     }
 
     init();

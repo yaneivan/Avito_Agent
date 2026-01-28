@@ -1,6 +1,6 @@
 import json
 from sqlmodel import Session, select, desc
-from database import SearchSession, ChatSession, ChatMessage, ExtractionSchema
+from database import DeepResearchSession, SearchSession, ChatSession, ChatMessage, ExtractionSchema
 from llm_engine import deep_research_agent
 
 class DeepResearchOrchestrator:
@@ -20,22 +20,32 @@ class DeepResearchOrchestrator:
         # но основная логика теперь в routers/deep_research.py
         raise NotImplementedError("Этот метод устарел. Используйте llm_engine.deep_research_agent напрямую.")
 
-    def _get_or_create_search_session(self, query: str) -> SearchSession:
+    def _get_or_create_search_session(self, query: str) -> DeepResearchSession:
         """Устаревший метод"""
-        s = self.db.exec(select(SearchSession).where(SearchSession.mode == "deep", SearchSession.status == "created").order_by(desc(SearchSession.created_at))).first()
+        s = self.db.exec(select(DeepResearchSession).where(DeepResearchSession.status == "created").order_by(desc(DeepResearchSession.created_at))).first()
         if not s:
-            print("[DEBUG ORCH] Creating new Deep Session")
-            s = SearchSession(query_text=query, mode="deep", stage="interview", status="created", limit_count=10)
+            print("[DEBUG ORCH] Creating new Deep Research Session")
+            s = DeepResearchSession(query_text=query, stage="interview", status="created", limit_count=10)
             self.db.add(s); self.db.commit(); self.db.refresh(s)
         return s
 
-    def _get_or_create_chat_session(self, search_id: int) -> ChatSession:
+    def _get_or_create_chat_session(self, research_session: DeepResearchSession) -> ChatSession:
         """Устаревший метод"""
-        title = f"Deep Research Chat - {search_id}"
-        c = self.db.exec(select(ChatSession).where(ChatSession.title.contains(str(search_id)))).first()
-        if not c:
-            c = ChatSession(title=title)
-            self.db.add(c); self.db.commit(); self.db.refresh(c)
+        # Проверяем, есть ли уже связанная чат-сессия
+        if research_session.chat_session_id:
+            c = self.db.get(ChatSession, research_session.chat_session_id)
+            if c:
+                return c
+        
+        # Создаем новую чат-сессию
+        title = f"Глубокое исследование: {research_session.query_text[:30]}..."
+        c = ChatSession(title=title)
+        self.db.add(c); self.db.commit(); self.db.refresh(c)
+        
+        # Связываем сессии
+        research_session.chat_session_id = c.id
+        self.db.add(research_session); self.db.commit()
+        
         return c
 
     def _save_message(self, chat_id: int, role: str, content: str, meta: dict):
@@ -43,10 +53,10 @@ class DeepResearchOrchestrator:
         msg = ChatMessage(role=role, content=content, chat_session_id=chat_id, extra_metadata=json.dumps(meta, ensure_ascii=False))
         self.db.add(msg); self.db.commit()
 
-    async def confirm_schema(self, search_id: int, schema_str: str):
+    async def confirm_schema(self, research_id: int, schema_str: str):
         """Устаревший метод"""
-        print(f"[DEBUG ORCH] Confirming schema for Task #{search_id}")
-        s = self.db.get(SearchSession, search_id)
+        print(f"[DEBUG ORCH] Confirming schema for Research #{research_id}")
+        s = self.db.get(DeepResearchSession, research_id)
         if not s: return None
         s.schema_agreed, s.stage, s.status = schema_str, "parsing", "confirmed"
 
@@ -56,23 +66,23 @@ class DeepResearchOrchestrator:
             ex = ExtractionSchema(name=name, description="Auto", structure_json=schema_str)
             self.db.add(ex); self.db.commit(); self.db.refresh(ex)
         s.schema_id = ex.id
-        self.db.add(s); self.db.commit()
+        self.db.add(s); self.db.commit();
 
 
 # Функция для подтверждения схемы, используемая в router
-async def confirm_search_schema(search_id: int, schema_dict: dict, session: Session):
+async def confirm_search_schema(research_id: int, schema_dict: dict, session: Session):
     """Подтверждение схемы и подготовка к поиску"""
-    search_session = session.get(SearchSession, search_id)
-    if not search_session:
+    research_session = session.get(DeepResearchSession, research_id)
+    if not research_session:
         return False
 
     schema_str = json.dumps(schema_dict, ensure_ascii=False)
-    search_session.schema_agreed = schema_str
-    search_session.stage = "parsing"
-    search_session.status = "confirmed"
+    research_session.schema_agreed = schema_str
+    research_session.stage = "parsing"
+    research_session.status = "confirmed"
 
     # Создаем или обновляем схему извлечения
-    name = f"DeepResearch_{search_session.id}"
+    name = f"DeepResearch_{research_session.id}"
     existing_schema = session.exec(
         select(ExtractionSchema).where(ExtractionSchema.name == name)
     ).first()
@@ -86,9 +96,26 @@ async def confirm_search_schema(search_id: int, schema_dict: dict, session: Sess
         session.add(new_schema)
         session.commit()
         session.refresh(new_schema)
-        search_session.schema_id = new_schema.id
+        research_session.schema_id = new_schema.id
+
+    session.add(research_session)
+    session.commit()
+
+    # Создаем связанную SearchSession для расширения
+    search_session = SearchSession(
+        query_text=research_session.query_text,
+        status="confirmed",  # Устанавливаем статус confirmed, чтобы задача была доступна для расширения
+        mode="deep_research",  # Указываем режим глубокого исследования
+        stage="parsing",
+        limit_count=research_session.limit_count,
+        open_in_browser=research_session.open_in_browser,
+        use_cache=research_session.use_cache,
+        deep_research_session_id=research_session.id,  # Связываем с DeepResearchSession
+        schema_id=new_schema.id if not existing_schema else existing_schema.id  # Используем ту же схему
+    )
 
     session.add(search_session)
     session.commit()
+    session.refresh(search_session)  # Обновляем, чтобы получить ID
 
     return True

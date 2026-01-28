@@ -28,10 +28,12 @@ def get_task(session: Session = Depends(get_session)):
 @router.post("/submit_results")
 async def submit_results(data: SubmitData):
     print(f"\n[API] Received {len(data.items)} items for Task #{data.task_id}")
+    print(f"[DEBUG] First item structured_data: {data.items[0].structured_data if data.items else 'No items'}")
     processed = []
-    
+
     # Сначала сохраняем картинки, чтобы не держать base64 в памяти
     for idx, item in enumerate(data.items):
+        print(f"[DEBUG] Processing item {idx}, structured_data: {item.structured_data}")
         try:
             path = save_base64_image(item.image_base64, data.task_id, idx, item.url)
             item.local_path = path
@@ -39,8 +41,9 @@ async def submit_results(data: SubmitData):
             processed.append(item)
         except Exception as e:
             print(f"[ERROR] Image save failed: {e}")
-            
+
     # Запускаем тяжелую обработку
+    print(f"[DEBUG] About to process incoming data with {len(processed)} items")
     await service.process_incoming_data(data.task_id, processed)
     return {"status": "ok"}
 

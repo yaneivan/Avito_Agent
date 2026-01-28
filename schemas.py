@@ -7,7 +7,8 @@ class ItemSchema(BaseModel):
     url: str
     description: Optional[str] = None
     image_base64: Optional[str] = None
-    local_path: Optional[str] = None 
+    local_path: Optional[str] = None
+    structured_data: Optional[Dict[str, Any]] = None 
 
 class SubmitData(BaseModel):
     task_id: int
