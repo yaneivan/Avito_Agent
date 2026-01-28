@@ -68,12 +68,9 @@ async def agent_chat(req: ChatRequest, session: Session = Depends(get_session)):
         schema_name = decision.get("schema_name") or "General"
         target_schema = session.exec(select(ExtractionSchema).where(ExtractionSchema.name == schema_name)).first()
         if not target_schema:
-            try:
-                ns = await generate_schema_structure(schema_name)
-                target_schema = ExtractionSchema(name=schema_name, description="Auto", structure_json=json.dumps(ns["schema"], ensure_ascii=False))
-                session.add(target_schema); session.commit(); session.refresh(target_schema)
-            except: 
-                target_schema = None
+            ns = await generate_schema_structure(schema_name)
+            target_schema = ExtractionSchema(name=schema_name, description="Auto", structure_json=json.dumps(ns["schema"], ensure_ascii=False))
+            session.add(target_schema); session.commit(); session.refresh(target_schema)
 
         task = SearchSession(
             query_text=decision.get("search_query") or user_content,

@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, desc
 from dependencies import get_session
-from schemas import InterviewRequest, SchemaAgreementRequest
+from schemas import InterviewRequest
 from database import DeepResearchSession, SearchSession, ChatSession, ChatMessage, ExtractionSchema, Item, SearchItemLink
 from llm_engine import deep_research_agent, generate_schema_proposal
 from services import ProcessingService
@@ -116,43 +116,64 @@ async def deep_research_chat_endpoint(
 
             if function_name == "propose_schema":
                 print("[INFO] Executing propose_schema tool call")
-                schema_result = await generate_schema_proposal(arguments["criteria"])
-                # Выводим только краткую информацию о схеме, без подробных описаний
-                schema_info = {
-                    "fields_count": len(schema_result.get("schema", {})),
-                    "search_query": schema_result.get("search_query", "")
-                }
-                print(f"[INFO] Schema proposal generated: {schema_info}")
+                try:
+                    schema_result = await generate_schema_proposal(arguments["criteria"])
+                    # Выводим только краткую информацию о схеме, без подробных описаний
+                    schema_info = {
+                        "fields_count": len(schema_result.get("schema", {})),
+                        "search_query": schema_result.get("search_query", "")
+                    }
+                    print(f"[INFO] Schema proposal generated: {schema_info}")
 
-                # Сохраняем предложенную схему
-                research_session.schema_agreed = json.dumps(schema_result["schema"], ensure_ascii=False)
-                research_session.stage = "schema_proposed"
-                session.add(research_session)
-                session.commit()
-                print("[INFO] Schema saved and session updated")
+                    # Сохраняем предложенную схему
+                    research_session.schema_agreed = json.dumps(schema_result["schema"], ensure_ascii=False)
+                    research_session.stage = "schema_proposed"
+                    session.add(research_session)
+                    session.commit()
+                    print("[INFO] Schema saved and session updated")
 
-                # Сохраняем сообщение с предложенной схемой
-                _save_message(
-                    session,
-                    chat_session.id,
-                    "assistant",
-                    f"Я предлагаю следующую схему извлечения данных: {json.dumps(schema_result['schema'], ensure_ascii=False, indent=2)}",
-                    {"stage": "schema_proposed", "schema_proposal": schema_result["schema"]}
-                )
-                print("[INFO] Assistant message with schema proposal saved")
+                    # Сохраняем сообщение с предложенной схемой
+                    _save_message(
+                        session,
+                        chat_session.id,
+                        "assistant",
+                        f"Я предлагаю следующую схему извлечения данных: {json.dumps(schema_result['schema'], ensure_ascii=False, indent=2)}",
+                        {"stage": "schema_proposed", "schema_proposal": schema_result["schema"]}
+                    )
+                    print("[INFO] Assistant message with schema proposal saved")
 
-                return {
-                    "type": "schema_proposal",
-                    "message": f"Я предлагаю следующую схему извлечения данных: {json.dumps(schema_result['schema'], ensure_ascii=False, indent=2)}",
-                    "schema_proposal": schema_result["schema"],
-                    "stage": "schema_proposed",
-                    "research_id": research_session.id
-                }
+                    return {
+                        "type": "schema_proposal",
+                        "message": f"Я предлагаю следующую схему извлечения данных: {json.dumps(schema_result['schema'], ensure_ascii=False, indent=2)}",
+                        "schema_proposal": schema_result["schema"],
+                        "stage": "schema_proposed",
+                        "research_id": research_session.id
+                    }
+                except ValueError as e:
+                    print(f"[ERROR] Schema generation failed: {e}")
+
+                    # Сохраняем сообщение об ошибке
+                    _save_message(
+                        session,
+                        chat_session.id,
+                        "assistant",
+                        str(e),
+                        {"stage": research_session.stage, "error": "schema_generation_failed"}
+                    )
+                    print("[INFO] Error message saved to chat session")
+
+                    return {
+                        "type": "error",
+                        "message": str(e),
+                        "research_id": research_session.id,
+                        "stage": research_session.stage
+                    }
 
             elif function_name == "proceed_to_search":
                 print("[INFO] Executing proceed_to_search tool call")
                 # Подтверждение схемы и переход к поиску
-                success = await confirm_search_schema(research_session.id, arguments["schema"], session)
+                search_query = arguments.get("search_query", research_session.query_text)
+                success = await confirm_search_schema(research_session.id, arguments["schema"], session, search_query)
                 print(f"[INFO] Schema confirmation result: {success}")
 
                 if success:
@@ -210,10 +231,6 @@ async def deep_research_chat_endpoint(
         }
 
 
-# Удаляем endpoint для отдельного согласования схемы,
-# так как теперь это часть основного потока
-# @router.post("/schema_agreement")
-# async def schema_agreement(...)
 
 @router.post("/start_parsing")
 async def start_parsing(research_id: int, session: Session = Depends(get_session)):

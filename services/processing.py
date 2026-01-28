@@ -11,24 +11,20 @@ class ProcessingService:
         # Используем отдельную сессию для получения сессии
         with Session(engine) as session:
             # Определяем тип сессии: SearchSession или DeepResearchSession
-            try:
-                s_req = session.get(SearchSession, task_id)
-                research_session = None
+            s_req = session.get(SearchSession, task_id)
+            research_session = None
 
-                if not s_req:
-                    research_session = session.get(DeepResearchSession, task_id)
-                    if not research_session:
-                        print(f"[ERROR SERVICE] Task #{task_id} not found in DB!")
-                        return
-                    s_req = research_session  # Используем research_session как основной объект
-                else:
-                    # Проверяем, связана ли SearchSession с DeepResearchSession
-                    # (это может быть случай для простых поисков)
-                    if s_req.deep_research_session_id:
-                        research_session = session.get(DeepResearchSession, s_req.deep_research_session_id)
-            except Exception as e:
-                print(f"[ERROR SERVICE] Database error when getting session {task_id}: {e}")
-                return
+            if not s_req:
+                research_session = session.get(DeepResearchSession, task_id)
+                if not research_session:
+                    print(f"[ERROR SERVICE] Task #{task_id} not found in DB!")
+                    return
+                s_req = research_session  # Используем research_session как основной объект
+            else:
+                # Проверяем, связана ли SearchSession с DeepResearchSession
+                # (это может быть случай для простых поисков)
+                if s_req.deep_research_session_id:
+                    research_session = session.get(DeepResearchSession, s_req.deep_research_session_id)
 
             processed_items = []
             
@@ -56,14 +52,21 @@ class ProcessingService:
                         print(f"[DEBUG SERVICE] Analyzing Item {i}: {db_item.title[:30]}...")
                         print(f"[DEBUG SERVICE] Original structured_data from extension: {getattr(item_dto, 'structured_data', 'Not found')}")
 
-                        # Получаем схему извлечения, если доступна (для DeepResearchSession)
+                        # Получаем схему извлечения из сессии
                         extraction_schema = None
+
+                        # Проверяем, является ли s_req DeepResearchSession (у него есть schema_agreed)
                         if hasattr(s_req, 'schema_agreed') and s_req.schema_agreed:
-                            try:
-                                extraction_schema = json.loads(s_req.schema_agreed)
-                                print(f"[DEBUG SERVICE] Using extraction schema: {list(extraction_schema.keys()) if extraction_schema else 'None'}")
-                            except json.JSONDecodeError:
-                                print(f"[DEBUG SERVICE] Could not decode schema_agreed: {s_req.schema_agreed}")
+                            extraction_schema = json.loads(s_req.schema_agreed)
+                            print(f"[DEBUG SERVICE] Using extraction schema from DeepResearchSession: {list(extraction_schema.keys()) if extraction_schema else 'None'}")
+
+                        # Если s_req - это SearchSession, используем schema_id для получения схемы
+                        elif hasattr(s_req, 'schema_id') and s_req.schema_id:
+                            from database import ExtractionSchema
+                            schema_obj = session.get(ExtractionSchema, s_req.schema_id)
+                            if schema_obj:
+                                extraction_schema = json.loads(schema_obj.structure_json)
+                                print(f"[DEBUG SERVICE] Using extraction schema from SearchSession: {list(extraction_schema.keys()) if extraction_schema else 'None'}")
 
                         try:
                             vlm = await extract_product_features(
@@ -210,7 +213,7 @@ class ChatProcessingService:
     async def process_user_message(self, user_message: str, chat_history: list):
         from llm_engine import decide_action
         try:
-            return {"decision": await decide_action(chat_history, [])}
+            return {"decision": await decide_action(chat_history)}
         except Exception as e:
             print(f"[ERROR CHAT] {e}")
             return {"decision": {"action": "chat", "reply": "Ошибка сервиса."}}

@@ -14,18 +14,14 @@ client = AsyncOpenAI(base_url=LOCAL_LLM_URL, api_key=API_KEY)
 
 def encode_image_to_base64(image_path: str) -> str | None:
     if not image_path or not os.path.exists(image_path): return None
-    try:
-        with open(image_path, "rb") as f: return base64.b64encode(f.read()).decode('utf-8')
-    except Exception as e:
-        print(f"[ERROR] Image encode: {e}")
-        return None
+    with open(image_path, "rb") as f: return base64.b64encode(f.read()).decode('utf-8')
 
 def clean_json(content: str) -> str:
     if "```json" in content: content = content.split("```json")[1].split("```")[0]
     elif "```" in content: content = content.split("```")[1].split("```")[0]
     return content.strip()
 
-async def decide_action(history: list, available_schemas: list[str]) -> dict:
+async def decide_action(history: list) -> dict:
     print(f"\n[DEBUG LLM] Deciding action for: {history[-1]}")
     prompt = f"""Ты — помощник пользователя на сайте Avito.
 Твоя задача: понять, хочет ли пользователь найти товар или просто болтает.
@@ -46,43 +42,10 @@ async def decide_action(history: list, available_schemas: list[str]) -> dict:
   "schema_name": "general",
   "reply": "текст ответа"
 }}"""
-    try:
-        res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.1)
-        resp_text = clean_json(res.choices[0].message.content)
-        print(f"[DEBUG LLM] Decision: {resp_text}")
-        return json.loads(resp_text)
-    except Exception as e:
-        print(f"[ERROR LLM] Decide action: {e}")
-        return {"action": "chat", "reply": "Я готов искать. Что вам нужно?", "reasoning": "error"}
-
-async def conduct_interview(history: list, interview_data: str = "") -> dict:
-    print(f"\n[DEBUG LLM] Interview step. Data: {interview_data}")
-    prompt = f"""Ты — дружелюбный помощник на Авито. Помогаешь человеку купить вещь ДЛЯ СЕБЯ (1 шт).
-НЕ спрашивай про: объем партии, условия поставки для юрлиц, сроки закупки.
-ТВОЯ ЦЕЛЬ: Узнать только 2 вещи:
-1. Что ищем (Категория/Товар).
-2. Бюджет (Сколько денег).
-
-Если пользователь уже назвал товар и цену (например "ноутбук за 30к") — НЕ задавай лишних вопросов, сразу завершай.
-
-ТЕКУЩИЕ ДАННЫЕ: {interview_data}
-ПОСЛЕДНЕЕ СООБЩЕНИЕ: {history[-1]}
-
-ОТВЕТЬ ТОЛЬКО JSON:
-{{
-  "response": "твой вопрос или итог",
-  "needs_more_info": true (если нет бюджета или товара) или false (если всё есть),
-  "criteria_summary": "кратко: товар и бюджет (строка)",
-  "reasoning": "почему"
-}}"""
-    try:
-        res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.3)
-        resp_text = clean_json(res.choices[0].message.content)
-        print(f"[DEBUG LLM] Interview response: {resp_text}")
-        return json.loads(resp_text)
-    except Exception as e:
-        print(f"[ERROR LLM] Interview: {e}")
-        return {"response": "Что ищем и какой бюджет?", "needs_more_info": True, "criteria_summary": "", "reasoning": "error"}
+    res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.1)
+    resp_text = clean_json(res.choices[0].message.content)
+    print(f"[DEBUG LLM] Decision: {resp_text}")
+    return json.loads(resp_text)
 
 async def deep_research_agent(history: list, current_state: dict) -> dict:
     """
@@ -128,20 +91,24 @@ async def deep_research_agent(history: list, current_state: dict) -> dict:
     ]
 
     prompt = f"""
-    Ты — агент глубокого исследования для поиска товаров на Авито.
+    Ты — профессиональный консультант по покупкам на Avito. Твоя цель — провести интервью, чтобы сформировать идеальный запрос для парсинга и анализа рынка.
 
-    ТВОЯ ЗАДАЧА:
-    1. Понять, что ищет пользователь (товар и бюджет)
-    2. Если у тебя достаточно информации, предложи схему извлечения данных через инструмент propose_schema
-    3. Если пользователь согласен с предложенной схемой, используй инструмент proceed_to_search
-    4. Если пользователь не согласен с предложенной схемой или предлагает изменения,
-       ответь ему напрямую, уточни требования и при необходимости снова предложи схему
-    5. Если пользователь задает уточняющие вопросы, отвечай на них
+    ЛОГИКА ТВОЕЙ РАБОТЫ:
+    1. ЭТАП ЗНАКОМСТВА: Если пользователь просто здоровается или пишет не по делу — поддержи диалог и мягко спроси, какой товар его интересует и какой у него бюджет.
+    2. ЭТАП ИНТЕРВЬЮ: Ты должен узнать (1) КАТЕГОРИЮ товара и (2) БЮДЖЕТ. Пока эти два пункта не ясны, ты только задаешь вопросы в текстовом виде. Инструменты не вызываешь.
+    3. ЭТАП ПРЕДЛОЖЕНИЯ (propose_schema): Только когда известны и товар, и бюджет, ты предлагаешь JSON-схему полей, которые нужно извлечь (например: пробег, память, состояние).
+    4. ЭТАП ПОДТВЕРЖДЕНИЯ (proceed_to_search): Если пользователь подтвердил предложенную схему (сказал "да", "ок", "поехали"), вызывай инструмент перехода к поиску.
 
-    ТЕКУЩЕЕ СОСТОЯНИЕ: {current_state}
-    ИСТОРИЯ ДИАЛОГА: {history[-10:]}
+    ТЕКУЩЕЕ СОСТОЯНИЕ СИСТЕМЫ: {current_state}
+    ИСТОРИЯ ДИАЛОГА (последние сообщения): {history[-10:]}
 
-    Выбери подходящий инструмент или ответь пользователю напрямую.
+    КРИТИЧЕСКИЕ ПРАВИЛА:
+    - ЗАПРЕЩЕНО вызывать `propose_schema` на приветствие ("привет", "хай") или пустой разговор.
+    - Сначала всегда отвечай текстом, чтобы уточнить детали, если информации мало.
+    - Если пользователь хочет изменить схему — вернись на этап интервью.
+    - Твой ответ должен быть либо вызовом инструмента, либо обычным текстом, но НЕ ОБОИМ СРАЗУ.
+
+    Действуй:
     """
 
     try:
@@ -235,8 +202,9 @@ async def generate_schema_proposal(criteria: str) -> dict:
     try:
         res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.2)
         return json.loads(clean_json(res.choices[0].message.content))
-    except:
-        return {"schema": {"title": {"type": "str", "desc": "Название"}}, "reasoning": "fallback"}
+    except Exception as e:
+        print(f"[ERROR LLM] Failed to generate schema: {e}")
+        raise ValueError(f"Не удалось сгенерировать схему извлечения данных для запроса '{criteria}'. Пожалуйста, уточните запрос или повторите попытку.")
 
 async def extract_product_features(title: str, desc: str, price: str, img_path: str, criteria: str, extraction_schema: dict = None) -> dict:
     """
@@ -258,85 +226,103 @@ async def extract_product_features(title: str, desc: str, price: str, img_path: 
             - specs (dict): Извлеченные структурированные характеристики
     """
     from schemas import RelevanceEvaluation
-    from pydantic import create_model
     import json
 
-    # Если передана схема извлечения, создаем динамическую модель
+    # Если передана схема извлечения, извлекаем характеристики по схеме
     if extraction_schema:
-        # Создаем динамические поля на основе схемы
-        dynamic_fields = {}
-        for field_name, field_info in extraction_schema.items():
-            field_type = field_info.get("type", "str")
-            # Преобразуем строковые типы в соответствующие Python-типы
-            if field_type == "int":
-                pydantic_type = (int, ...)
-            elif field_type == "float":
-                pydantic_type = (float, ...)
-            elif field_type == "bool":
-                pydantic_type = (bool, ...)
-            else:  # по умолчанию str
-                pydantic_type = (str, ...)
+        # Проверяем, что extraction_schema - это словарь
+        if isinstance(extraction_schema, str):
+            try:
+                extraction_schema = json.loads(extraction_schema)
+            except json.JSONDecodeError:
+                print(f"[ERROR LLM] Failed to decode extraction schema: {extraction_schema}")
+                extraction_schema = {}
 
-            dynamic_fields[field_name] = pydantic_type
-
-        # Создаем динамическую модель, наследуясь от RelevanceEvaluation
-        DynamicEvaluation = create_model(
-            'DynamicEvaluation',
-            relevance_score=(int, ...),
-            visual_notes=(str, ...),
-            specs=(dict, ...),
-            **dynamic_fields
-        )
-
-        # Формируем промпт с учетом схемы
+        # Формируем промпт для извлечения характеристик по схеме
         schema_info = f"Требуется извлечь следующие характеристики: {list(extraction_schema.keys())}. "
-        schema_description = json.dumps(DynamicEvaluation.model_json_schema(), ensure_ascii=False, indent=2)
-        prompt = f"""Оцени товар: "{title}", цена: {price}. Запрос: "{criteria}".
-{schema_info}Ты должен вернуть JSON-объект, строго соответствующий следующей схеме:
-{schema_description}"""
-    else:
-        # Если схема не передана, используем базовую модель
-        schema_info = ""
-        schema_description = json.dumps(RelevanceEvaluation.model_json_schema(), ensure_ascii=False, indent=2)
-        prompt = f"""Оцени товар: "{title}", цена: {price}. Запрос: "{criteria}".
-{schema_info}Ты должен вернуть JSON-объект, строго соответствующий следующей схеме:
-{schema_description}"""
-        DynamicEvaluation = RelevanceEvaluation
+        extraction_prompt = f"""Проанализируй товар "{title}" и извлеки следующие характеристики в соответствии с запросом "{criteria}":
+{schema_info}
+Описание: {desc}
+Цена: {price}
 
-    msg = [{"type": "text", "text": prompt}]
-    b64 = encode_image_to_base64(img_path)
-    if b64: msg.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+Верни JSON-объект с извлеченными значениями для каждой характеристики.
+Если характеристика не указана в описании или на изображении, НЕ ВКЛЮЧАЙ ЕЁ в результат."""
 
-    try:
-        # Используем Structured Outputs для гарантии корректной структуры ответа
-        completion = await client.beta.chat.completions.parse(
+        extraction_msg = [{"type": "text", "text": extraction_prompt}]
+        b64 = encode_image_to_base64(img_path)
+        if b64:
+            extraction_msg.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+        # Извлекаем структурированные данные по схеме
+        extraction_completion = await client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[{"role": "user", "content": msg}],
-            response_format=DynamicEvaluation,  # Передаем динамическую модель
+            messages=[{"role": "user", "content": extraction_msg}],
             temperature=0.1
         )
 
-        # Возвращаем результат как словарь
-        result = completion.choices[0].message.parsed.dict()
+        # Извлекаем JSON из ответа
+        content = extraction_completion.choices[0].message.content
+        # Убираем маркеры кода, если они есть
+        if content.startswith('```json'):
+            content = content[7:content.rfind('```')]
+        elif content.startswith('```'):
+            content = content[3:content.rfind('```')]
 
-        # Если использовалась динамическая модель, перемещаем извлеченные поля в specs
-        if extraction_schema and DynamicEvaluation != RelevanceEvaluation:
-            extracted_values = {}
-            for field_name in extraction_schema.keys():
-                if field_name in result:
-                    extracted_values[field_name] = result[field_name]
-                    # Удаляем поле из результата, чтобы не дублировать
-                    del result[field_name]
+        extracted_specs = json.loads(content.strip())
 
-            # Обновляем поле specs с извлеченными значениями
-            result["specs"] = extracted_values
+        # Валидируем и конвертируем извлеченные данные в соответствии со схемой
+        validated_specs = {}
+        for field_name, field_info in extraction_schema.items():
+            if field_name in extracted_specs:
+                expected_type = field_info.get("type", "str")
+                value = extracted_specs[field_name]
 
-        return result
-    except Exception as e:
-        print(f"[ERROR LLM] Extract product features: {e}")
-        # Возвращаем валидный ответ по умолчанию
-        default_response = RelevanceEvaluation(relevance_score=1, visual_notes="Ошибка анализа", specs={})
-        return default_response.dict()
+                # Конвертируем значение к ожидаемому типу
+                if value is not None and value != "null":
+                    if expected_type == "int":
+                        validated_specs[field_name] = int(value)
+                    elif expected_type == "float":
+                        validated_specs[field_name] = float(value)
+                    elif expected_type == "bool":
+                        validated_specs[field_name] = bool(value)
+                    else:  # строковый тип
+                        validated_specs[field_name] = str(value)
+                    # Если значение null или не удалось конвертировать, не включаем в результат
+    else:
+        validated_specs = {}
+
+    # Теперь получаем оценку релевантности
+    relevance_prompt = f"""Оцени, насколько товар "{title}" (цена: {price}) соответствует запросу "{criteria}".
+Оцени релевантность по шкале от 0 до 100, где 0 - совсем не подходит, 100 - идеально подходит.
+Верни только JSON-объект с полями relevance_score (число) и visual_notes (строка с комментарием)."""
+
+    relevance_msg = [{"type": "text", "text": relevance_prompt}]
+    b64 = encode_image_to_base64(img_path)
+    if b64:
+        relevance_msg.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+    relevance_completion = await client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": relevance_msg}],
+        temperature=0.1
+    )
+
+    content = relevance_completion.choices[0].message.content
+    if content.startswith('```json'):
+        content = content[7:content.rfind('```')]
+    elif content.startswith('```'):
+        content = content[3:content.rfind('```')]
+
+    relevance_result = json.loads(content.strip())
+
+    # Собираем финальный результат
+    result = {
+        "relevance_score": relevance_result.get("relevance_score", 1),
+        "visual_notes": relevance_result.get("visual_notes", "Ошибка анализа"),
+        "specs": validated_specs
+    }
+
+    return result
 
 async def rank_items_group(items_data: list, criteria: str) -> dict:
     print(f"[DEBUG LLM] Ranking group of {len(items_data)}")
@@ -356,4 +342,6 @@ async def summarize_search_results(query: str, items: list) -> dict:
         return {"summary": "Отчет не создан из-за ошибки.", "reasoning": str(e)}
 
 async def generate_schema_structure(topic: str) -> dict:
+    # Эта функция используется в chat.py для генерации структуры схемы
+    # topic не используется в текущей реализации, но сохранен для совместимости
     return {"schema": {"title": {"type": "str", "desc": "Название"}, "price": {"type": "int", "desc": "Цена"}}}

@@ -14,20 +14,23 @@ def get_task(session: Session = Depends(get_session)):
     # Ищем подтвержденные задачи
     task = session.exec(select(SearchSession).where(SearchSession.status == "confirmed").limit(1)).first()
     if task:
-        print(f"\n[API] Extension picked up Task #{task.id}: {task.query_text}")
+        print(f"[API] Extension picked up Task #{task.id}: {task.query_text}")
+        print(f"[DEBUG TASK ROUTER] Task #{task.id} status changed from '{task.status}' to 'processing'")
         task.status = "processing"
         session.add(task); session.commit()
+        print(f"[DEBUG TASK ROUTER] Task #{task.id} committed to DB")
         return {
-            "task_id": task.id, 
-            "query": task.query_text, 
-            "active_tab": task.open_in_browser, 
+            "task_id": task.id,
+            "query": task.query_text,
+            "active_tab": task.open_in_browser,
             "limit": task.limit_count
         }
     return {"task_id": None}
 
 @router.post("/submit_results")
 async def submit_results(data: SubmitData):
-    print(f"\n[API] Received {len(data.items)} items for Task #{data.task_id}")
+    print(f"\n[DEBUG TASK ROUTER] Received submit_results request")
+    print(f"[API] Received {len(data.items)} items for Task #{data.task_id}")
     print(f"[DEBUG] First item structured_data: {data.items[0].structured_data if data.items else 'No items'}")
     processed = []
 
@@ -39,12 +42,15 @@ async def submit_results(data: SubmitData):
             item.local_path = path
             item.image_base64 = None # Освобождаем память
             processed.append(item)
+            print(f"[DEBUG] Image saved for item {idx} at {path}")
         except Exception as e:
-            print(f"[ERROR] Image save failed: {e}")
+            print(f"[ERROR] Image save failed for item {idx}: {e}")
 
+    print(f"[DEBUG TASK ROUTER] Successfully processed {len(processed)} items, about to call process_incoming_data")
     # Запускаем тяжелую обработку
     print(f"[DEBUG] About to process incoming data with {len(processed)} items")
     await service.process_incoming_data(data.task_id, processed)
+    print(f"[DEBUG TASK ROUTER] process_incoming_data completed for Task #{data.task_id}")
     return {"status": "ok"}
 
 @router.post("/log")
