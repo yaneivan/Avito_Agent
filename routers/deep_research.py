@@ -13,9 +13,51 @@ router = APIRouter(prefix="/api/deep_research", tags=["deep_research"])
 processing_service = ProcessingService()
 
 
-def _get_or_create_search_session(db_session: Session, query: str) -> DeepResearchSession:
+def _get_or_create_search_session(db_session: Session, query: str, research_session_id: int = None, chat_session_id: int = None) -> DeepResearchSession:
     """Получить или создать сессию глубокого исследования"""
-    # Создаем новую сессию для каждого нового запроса
+    # Если передан ID сессии, пытаемся найти существующую сессию
+    if research_session_id:
+        s = db_session.get(DeepResearchSession, research_session_id)
+        if s:
+            print(f"[DEBUG ORCH] Using existing Deep Research Session ID {research_session_id}")
+            return s
+        else:
+            print(f"[WARNING] Research session with ID {research_session_id} not found, creating new one")
+
+    # Ищем существующую НЕЗАВЕРШЕННУЮ сессию, связанную с той же чат-сессией
+    # Это предотвращает создание новых сессий при продолжении общения в рамках одного чата
+    # Если chat_session_id не передан явно, пробуем получить его из существующей research_session
+    if not chat_session_id and research_session_id:
+        # Если известен ID сессии глубокого исследования, получаем связанный чат
+        research_session = db_session.get(DeepResearchSession, research_session_id)
+        if research_session:
+            chat_session_id = research_session.chat_session_id
+
+    # Если у нас есть chat_session_id, ищем активную сессию глубокого исследования для этого чата
+    if chat_session_id:
+        existing_session = db_session.exec(
+            select(DeepResearchSession)
+            .where(DeepResearchSession.chat_session_id == chat_session_id)
+            .where(DeepResearchSession.status != "completed")
+        ).first()
+
+        if existing_session:
+            print(f"[DEBUG ORCH] Found existing Deep Research Session ID {existing_session.id} for chat session {chat_session_id}")
+            return existing_session
+
+    # Если не нашли сессию через chat_session_id, ищем по другим критериям
+    existing_session = db_session.exec(
+        select(DeepResearchSession)
+        .where(DeepResearchSession.query_text == query)
+        .where(DeepResearchSession.stage == "interview")
+        .where(DeepResearchSession.status != "completed")
+    ).first()
+
+    if existing_session:
+        print(f"[DEBUG ORCH] Found existing Deep Research Session ID {existing_session.id}")
+        return existing_session
+
+    # Создаем новую сессию только если не нашли подходящую
     print("[DEBUG ORCH] Creating new Deep Research Session")
     s = DeepResearchSession(query_text=query, stage="interview", status="created", limit_count=10)
     db_session.add(s)
@@ -24,13 +66,25 @@ def _get_or_create_search_session(db_session: Session, query: str) -> DeepResear
     return s
 
 
-def _get_or_create_chat_session(db_session: Session, research_session: DeepResearchSession) -> ChatSession:
+def _get_or_create_chat_session(db_session: Session, research_session: DeepResearchSession, chat_id_from_request: int = None) -> ChatSession:
     """Получить или создать сессию чата, связанную с сессией глубокого исследования"""
     # Проверяем, есть ли уже связанная чат-сессия
     if research_session.chat_session_id:
         c = db_session.get(ChatSession, research_session.chat_session_id)
         if c:
             return c
+
+    # Если передан chat_id из запроса, пробуем использовать его
+    if chat_id_from_request:
+        existing_chat = db_session.get(ChatSession, chat_id_from_request)
+        if existing_chat:
+            # Проверяем, не связана ли эта чат-сессия уже с другой сессией глубокого исследования
+            if not existing_chat.deep_research_session:
+                # Связываем сессии
+                research_session.chat_session_id = existing_chat.id
+                db_session.add(research_session)
+                db_session.commit()
+                return existing_chat
 
     # Создаем новую чат-сессию
     title = f"Глубокое исследование: {research_session.query_text[:30]}..."
@@ -82,11 +136,16 @@ async def deep_research_chat_endpoint(
         raise HTTPException(status_code=400, detail="Empty message")
 
     # Получаем или создаем сессию глубокого исследования
-    research_session = _get_or_create_search_session(session, user_content)
+    # Используем ID сессии из запроса, если он передан, иначе ищем по содержимому
+    research_session = _get_or_create_search_session(session, user_content, req.research_session_id, req.chat_id)
     print(f"[INFO] Deep research session created/retrieved: ID {research_session.id}, stage: {research_session.stage}")
 
     # Получаем или создаем связанную чат-сессию
-    chat_session = _get_or_create_chat_session(session, research_session)
+    # Используем chat_id из запроса, если он есть
+    chat_id_from_request = None
+    if req.chat_id:  # Предполагаем, что в запросе может быть chat_id
+        chat_id_from_request = req.chat_id
+    chat_session = _get_or_create_chat_session(session, research_session, chat_id_from_request)
     print(f"[INFO] Chat session created/retrieved: ID {chat_session.id}")
 
     _save_message(session, chat_session.id, "user", user_content, {"stage": research_session.stage})

@@ -25,6 +25,8 @@ class DeepResearchRequest(BaseModel):
 
 class InterviewRequest(BaseModel):
     history: List[Dict[str, Any]]
+    research_session_id: Optional[int] = None
+    chat_id: Optional[int] = None
 
 class SchemaAgreementRequest(BaseModel):
     search_id: int
