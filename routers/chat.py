@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, desc
 from dependencies import get_session
 from schemas import ChatRequest, ChatMessageSchema
-from database import ChatSession, ChatMessage, SearchSession, ExtractionSchema, Item, SearchItemLink
+from database import ChatSession, ChatMessage, SearchSession, ExtractionSchema, Item, SearchItemLink, DeepResearchSession
 from services import ChatProcessingService
 from llm_engine import generate_schema_structure
 
