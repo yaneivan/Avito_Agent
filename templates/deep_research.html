@@ -219,6 +219,12 @@
                 deepResearchId = data.research_id;
                 showStage('parsing');
                 startParsingPhase();
+            } else if (data.type === 'waiting_for_results') {
+                // Обработка ожидания результатов
+                addMsg('assistant', data.message);
+                deepResearchId = data.research_id;
+                showStage('parsing');  // Показываем стадию парсинга, но не запускаем обработку
+                waitForResultsAndProcess();
             } else if (data.type === 'error') {
                 // Обработка ошибки
                 addMsg('assistant', `❌ ${data.message}`);
@@ -253,9 +259,52 @@
         } catch (e) { console.error(e); }
     }
 
+    async function waitForResultsAndProcess() {
+        // Функция для опроса статуса сессии и запуска обработки при наличии результатов
+        const checkStatus = async () => {
+            try {
+                const response = await fetch(`/api/deep_research/status/${deepResearchId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const statusData = await response.json();
+
+                // Если статус изменился на "processing" или "completed", значит данные обрабатываются или готовы
+                if (statusData.stage === 'parsing' || statusData.stage === 'analysis' || statusData.stage === 'completed' ||
+                    statusData.status === 'processing' || statusData.status === 'completed') {
+                    // Переходим к отображению результатов
+                    showStage('results');
+                    fetchAnalysisResults();
+                } else {
+                    // Продолжаем опрашивать статус каждые 3 секунды
+                    setTimeout(checkStatus, 3000);
+                }
+            } catch (error) {
+                console.error('Error checking research status:', error);
+                // В случае ошибки продолжаем опрашивать
+                setTimeout(checkStatus, 3000);
+            }
+        };
+
+        // Начинаем опрос статуса
+        checkStatus();
+    }
+
     async function fetchAnalysisResults() {
         try {
-            await fetch(`/api/deep_research/execute_analysis?research_id=${deepResearchId}`, {method: 'POST'});
+            // Проверяем статус перед выполнением анализа
+            const statusRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
+            const statusData = await statusRes.json();
+
+            // Если статус не completed, то запускаем анализ
+            if (statusData.status !== 'completed') {
+                await fetch(`/api/deep_research/execute_analysis?research_id=${deepResearchId}`, {method: 'POST'});
+            }
+
+            // Ждем немного, чтобы дать время на обработку
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
             const sRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
             const sData = await sRes.json();
             analysisSummary.innerHTML = marked.parse(sData.summary || "Анализ...");

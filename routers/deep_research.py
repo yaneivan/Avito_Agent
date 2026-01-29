@@ -245,27 +245,33 @@ async def deep_research_chat_endpoint(
 
             elif function_name == "proceed_to_search":
                 print("[INFO] Executing proceed_to_search tool call")
-                # Подтверждение схемы и переход к поиску
+                # Подтверждение схемы и подготовка к поиску
                 search_query = arguments.get("search_query", research_session.query_text)
                 success = await confirm_search_schema(research_session.id, arguments["schema"], session, search_query)
                 print(f"[INFO] Schema confirmation result: {success}")
 
                 if success:
-                    # Сохраняем сообщение о начале поиска
+                    # Обновляем статус на "waiting_for_results" вместо "parsing"
+                    research_session.stage = "waiting_for_results"
+                    research_session.status = "waiting"
+                    session.add(research_session)
+                    session.commit()
+
+                    # Сохраняем сообщение о подтверждении схемы и ожидании результатов
                     _save_message(
                         session,
                         chat_session.id,
                         "assistant",
-                        "Схема подтверждена! Начинаю сбор данных...",
-                        {"stage": "parsing", "action": "search_started"}
+                        "Схема подтверждена! Ожидаю результаты поиска...",
+                        {"stage": "waiting_for_results", "action": "waiting_for_results"}
                     )
-                    print("[INFO] Assistant message with search start saved")
+                    print("[INFO] Assistant message with waiting status saved")
 
                     return {
-                        "type": "search_started",
-                        "message": "Схема подтверждена! Начинаю сбор данных...",
+                        "type": "waiting_for_results",
+                        "message": "Схема подтверждена! Ожидаю результаты поиска...",
                         "research_id": research_session.id,
-                        "stage": "parsing"
+                        "stage": "waiting_for_results"
                     }
                 else:
                     print("[WARNING] Failed to confirm schema")
@@ -323,9 +329,36 @@ async def start_parsing(research_id: int, session: Session = Depends(get_session
 
     # Запускаем обработку данных
     processing_service = ProcessingService()
+    # Вместо пустого списка, вызываем обработку с пустым списком только если действительно нужно
+    # В нормальной ситуации обработка будет происходить при получении данных от расширения
     await processing_service.process_incoming_data(research_id, [], is_deep_analysis=True)
 
     return {"status": "started", "research_id": research_id}
+
+
+@router.post("/process_results")
+async def process_results(research_id: int, items: list = None, session: Session = Depends(get_session)):
+    """Обработка результатов от расширения для глубокого исследования"""
+    from fastapi import HTTPException
+
+    if items is None:
+        items = []
+
+    research_session = session.get(DeepResearchSession, research_id)
+    if not research_session:
+        raise HTTPException(status_code=404, detail="Research session not found")
+
+    # Обновляем статус на parsing, так как теперь у нас есть результаты для обработки
+    research_session.status = "processing"
+    research_session.stage = "parsing"
+    session.add(research_session)
+    session.commit()
+
+    # Запускаем обработку полученных данных
+    processing_service = ProcessingService()
+    await processing_service.process_incoming_data(research_id, items, is_deep_analysis=True)
+
+    return {"status": "processing", "research_id": research_id}
 
 @router.get("/status/{research_id}")
 def get_research_status(research_id: int, session: Session = Depends(get_session)):

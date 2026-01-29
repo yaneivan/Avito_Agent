@@ -13,7 +13,9 @@ async def confirm_search_schema(research_id: int, schema_dict: dict, session: Se
 
     schema_str = json.dumps(schema_dict, ensure_ascii=False)
     research_session.schema_agreed = schema_str
-    research_session.stage = "parsing"
+    # Не устанавливаем stage в "parsing" сразу, а оставляем для дальнейшей обработки
+    # когда будут получены результаты от расширения
+    research_session.stage = "schema_confirmed"  # Новое состояние
     research_session.status = "confirmed"
 
     # Создаем или обновляем схему извлечения
