@@ -124,8 +124,8 @@ class ProcessingService:
                         if isinstance(s_req, SearchSession):
                             # Для обычной SearchSession используем стандартную логику
                             with Session(engine) as link_session:
-                                if not link_session.exec(select(SearchItemLink).where(SearchItemLink.search_id==task_id, SearchItemLink.item_id==db_item.id)).first():
-                                    link_session.add(SearchItemLink(search_id=task_id, item_id=db_item.id))
+                                if not link_session.exec(select(SearchItemLink).where(SearchItemLink.search_id==s_req.id, SearchItemLink.item_id==db_item.id)).first():
+                                    link_session.add(SearchItemLink(search_id=s_req.id, item_id=db_item.id))
                                     link_session.commit()
                         elif isinstance(s_req, DeepResearchSession):
                             # Для DeepResearchSession создаем SearchSession и линкуем к ней

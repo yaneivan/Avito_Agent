@@ -59,7 +59,7 @@ def _get_or_create_search_session(db_session: Session, query: str, research_sess
 
     # Создаем новую сессию только если не нашли подходящую
     print("[DEBUG ORCH] Creating new Deep Research Session")
-    s = DeepResearchSession(query_text=query, stage="interview", status="created", limit_count=10)
+    s = DeepResearchSession(query_text=query, stage="interview", status="created", limit_count=5)
     db_session.add(s)
     db_session.commit()
     db_session.refresh(s)
@@ -85,6 +85,20 @@ def _get_or_create_chat_session(db_session: Session, research_session: DeepResea
                 db_session.add(research_session)
                 db_session.commit()
                 return existing_chat
+
+    # Если у нас есть chat_id из запроса, но чат-сессия не существует или уже связана с другой сессией,
+    # используем существующую чат-сессию и обновляем её заголовок
+    if chat_id_from_request:
+        existing_chat = db_session.get(ChatSession, chat_id_from_request)
+        if existing_chat:
+            # Обновляем заголовок чат-сессии
+            existing_chat.title = f"Глубокое исследование: {research_session.query_text[:30]}..."
+            db_session.add(existing_chat)
+            # Связываем сессии
+            research_session.chat_session_id = existing_chat.id
+            db_session.add(research_session)
+            db_session.commit()
+            return existing_chat
 
     # Создаем новую чат-сессию
     title = f"Глубокое исследование: {research_session.query_text[:30]}..."
