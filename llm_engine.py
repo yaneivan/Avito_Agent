@@ -200,8 +200,13 @@ async def generate_schema_proposal(criteria: str) -> dict:
 ОТВЕТЬ ТОЛЬКО JSON."""
 
     try:
-        res = await client.chat.completions.create(model=MODEL_NAME, messages=[{"role": "user", "content": prompt}], temperature=0.2)
-        return json.loads(clean_json(res.choices[0].message.content))
+        res = await client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            response_format={"type": "json_object"}  # Указываем, что ожидаем JSON-объект
+        )
+        return json.loads(res.choices[0].message.content)
     except Exception as e:
         print(f"[ERROR LLM] Failed to generate schema: {e}")
         raise ValueError(f"Не удалось сгенерировать схему извлечения данных для запроса '{criteria}'. Пожалуйста, уточните запрос или повторите попытку.")
