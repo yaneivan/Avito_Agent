@@ -8,12 +8,13 @@
         <h1><i class="fas fa-brain me-2"></i>Глубокий анализ рынка</h1>
     </div>
 
-    <div id="interview-stage" class="chat-container" style="display: flex; flex-direction: column; background: #1a1a1a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #333;">
+    <!-- Чат -->
+    <div id="chat-section" class="chat-container" style="display: flex; flex-direction: column; background: #1a1a1a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #333; margin-bottom: 20px;">
         <div class="chat-header" style="padding: 15px 20px; background: #222; border-bottom: 1px solid #333; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
-            <span>Интервью - Сбор требований</span>
+            <span>Чат с агентом</span>
             <div id="current-state" style="font-size: 0.8em; color: #aaa;">Стадия: интервью</div>
         </div>
-        <div id="chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; max-height: 60vh; min-height: 300px;">
+        <div id="chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; max-height: 50vh; min-height: 300px;">
         </div>
         <div class="input-area" style="padding: 20px; background: #1a1a1a; border-top: 1px solid #333;">
             <div class="input-container" style="display: flex; gap: 10px;">
@@ -23,14 +24,14 @@
         </div>
     </div>
 
-    <div id="parsing-stage" class="hidden" style="display: none; padding: 40px; text-align: center; background: #1a1a1a; border-radius: 8px; border: 1px solid #333;">
-        <h3 style="color: #e0e0e0;">Сбор данных...</h3>
-        <p style="color: #aaa;">Агент работает...</p>
-        <button id="skip-parsing-btn" class="btn btn-outline-secondary mt-3">Показать результаты</button>
-    </div>
-
-    <div id="results-stage" class="hidden" style="display: none; margin-top: 20px;">
-        <h3 style="color: #4CAF50;">Результаты</h3>
+    <!-- Статус и результаты -->
+    <div id="status-results-section" style="margin-top: 20px;">
+        <div id="status-indicator" style="padding: 15px; background: #222; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="color: #e0e0e0; font-weight: bold;" id="status-text">Ожидание команды...</div>
+            <div id="progress-bar" style="width: 30%; height: 10px; background: #333; border-radius: 5px; overflow: hidden;">
+                <div id="progress-fill" style="height: 100%; width: 0%; background: #4CAF50; transition: width 0.3s;"></div>
+            </div>
+        </div>
         <div id="analysis-summary" style="margin-bottom: 30px; padding: 20px; background: #1e1e1e; border-radius: 8px; line-height: 1.6;"></div>
         <div id="top-items-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px;"></div>
     </div>
@@ -48,7 +49,8 @@
     const chatMessages = document.getElementById('chat-messages');
     const inp = document.getElementById('inp');
     const sendBtn = document.getElementById('send-btn');
-    const skipParsingBtn = document.getElementById('skip-parsing-btn');
+    const statusText = document.getElementById('status-text');
+    const progressBar = document.getElementById('progress-fill');
     const analysisSummary = document.getElementById('analysis-summary');
     const topItemsGrid = document.getElementById('top-items-grid');
     const currentStateElement = document.getElementById('current-state');
@@ -67,12 +69,14 @@
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
+    function updateStatus(text, progress = 0) {
+        statusText.textContent = text;
+        progressBar.style.width = `${progress}%`;
+    }
+
     function showStage(stage) {
         currentStage = stage;
-        document.getElementById('interview-stage').style.display = stage === 'interview' ? 'flex' : 'none';
-        document.getElementById('parsing-stage').style.display = stage === 'parsing' ? 'block' : 'none';
-        document.getElementById('results-stage').style.display = stage === 'results' ? 'block' : 'none';
-        const stageNames = {'interview': 'Интервью', 'parsing': 'Сбор данных', 'results': 'Результаты'};
+        const stageNames = {'interview': 'Интервью', 'parsing': 'Сбор данных', 'analysis': 'Анализ', 'results': 'Результаты'};
         if (currentStateElement) currentStateElement.textContent = `Стадия: ${stageNames[stage] || stage}`;
     }
 
@@ -109,6 +113,7 @@
                                 // Если сессия завершена, показываем результаты
                                 if (statusData.status === 'completed') {
                                     showStage('results');
+                                    updateStatus('Анализ завершен', 100);
 
                                     if (statusData.summary) {
                                         analysisSummary.innerHTML = marked.parse(statusData.summary);
@@ -123,10 +128,16 @@
                                     // Если сессия не завершена, проверяем текущую стадию
                                     if (statusData.stage === 'parsing') {
                                         showStage('parsing');
+                                        updateStatus('Сбор данных...', 50);
+                                    } else if (statusData.stage === 'analysis') {
+                                        showStage('analysis');
+                                        updateStatus('Анализ результатов...', 75);
                                     } else if (statusData.stage === 'results') {
                                         showStage('results');
+                                        updateStatus('Формирование отчета...', 90);
                                     } else {
                                         showStage('interview');
+                                        updateStatus('Интервью - сбор требований', 25);
                                     }
                                 }
                             }
@@ -140,6 +151,7 @@
                 const welcome = "Привет! Я помогу вам провести глубокий анализ рынка.";
                 addMsg('assistant', welcome);
                 deepHistory.push({role: "assistant", content: welcome});
+                updateStatus('Интервью - сбор требований', 25);
 
                 // Создаем новую сессию глубокого исследования
                 const res = await fetch('/api/deep_research/chat', {
@@ -168,6 +180,7 @@
                 const welcome = "Привет! Я помогу вам провести глубокий анализ рынка.";
                 addMsg('assistant', welcome);
                 deepHistory.push({role: "assistant", content: welcome});
+                updateStatus('Интервью - сбор требований', 25);
             }
         }
     }
@@ -196,6 +209,7 @@
                 addMsg('assistant', data.message);
                 deepResearchId = data.research_id;
                 showStage('parsing');
+                updateStatus('Сбор данных...', 50);
                 startParsingPhase();
             } else if (data.type === 'interview') {
                 let msgText = data.message;
@@ -218,12 +232,14 @@
                 addMsg('assistant', data.message);
                 deepResearchId = data.research_id;
                 showStage('parsing');
+                updateStatus('Сбор данных...', 50);
                 startParsingPhase();
             } else if (data.type === 'waiting_for_results') {
                 // Обработка ожидания результатов
                 addMsg('assistant', data.message);
                 deepResearchId = data.research_id;
-                showStage('parsing');  // Показываем стадию парсинга, но не запускаем обработку
+                showStage('parsing');
+                updateStatus('Сбор данных...', 50);
                 waitForResultsAndProcess();
             } else if (data.type === 'error') {
                 // Обработка ошибки
@@ -244,16 +260,12 @@
     sendBtn.addEventListener('click', sendMessage);
     inp.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-    skipParsingBtn.addEventListener('click', () => {
-        showStage('results');
-        if (deepResearchId) fetchAnalysisResults();
-    });
-
     async function startParsingPhase() {
         try {
             await fetch(`/api/deep_research/start_parsing?research_id=${deepResearchId}`, {method: 'POST'});
+            updateStatus('Сбор данных...', 50);
             setTimeout(() => {
-                showStage('results');
+                updateStatus('Анализ результатов...', 75);
                 fetchAnalysisResults();
             }, 3000);
         } catch (e) { console.error(e); }
@@ -274,7 +286,7 @@
                 if (statusData.stage === 'parsing' || statusData.stage === 'analysis' || statusData.stage === 'completed' ||
                     statusData.status === 'processing' || statusData.status === 'completed') {
                     // Переходим к отображению результатов
-                    showStage('results');
+                    updateStatus('Анализ результатов...', 75);
                     fetchAnalysisResults();
                 } else {
                     // Продолжаем опрашивать статус каждые 3 секунды
@@ -307,22 +319,62 @@
 
             const sRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
             const sData = await sRes.json();
-            analysisSummary.innerHTML = marked.parse(sData.summary || "Анализ...");
+            
+            if (sData.summary) {
+                analysisSummary.innerHTML = marked.parse(sData.summary);
+            }
+            
+            updateStatus('Формирование отчета...', 90);
+            
             const iRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
             const items = await iRes.json();
             renderTopItemsGrid(items);
+            
+            updateStatus('Анализ завершен', 100);
+            showStage('results');
         } catch (e) { console.error(e); }
     }
 
     function renderTopItemsGrid(items) {
-        if (!items.length) { topItemsGrid.innerHTML = 'Нет данных'; return; }
+        if (!items.length) {
+            topItemsGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #888;">Нет данных</div>';
+            return;
+        }
         let html = '';
         for (const item of items) {
+            // Парсим structured_data, если есть
+            let structuredData = {};
+            if (item.structured_data) {
+                try {
+                    structuredData = JSON.parse(item.structured_data);
+                } catch (e) {
+                    console.error('Error parsing structured_data:', e);
+                }
+            }
+
+            // Формируем список характеристик
+            let featuresHtml = '';
+            if (Object.keys(structuredData).length > 0) {
+                featuresHtml = '<div class="features-list" style="display: none; padding: 10px; background: #2a2a2a; border-top: 1px solid #444;">';
+                for (const [key, value] of Object.entries(structuredData)) {
+                    featuresHtml += '<div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed #444;">' +
+                                   '<span style="color: #aaa; font-size: 0.9em;">' + key + ':</span>' +
+                                   '<span style="color: #eee; font-size: 0.9em;">' + value + '</span>' +
+                                   '</div>';
+                }
+                featuresHtml += '</div>';
+            }
+
             html += '<div class="card" style="background:#222; border:1px solid #444; overflow: hidden; border-radius: 8px;">' +
                     '<img src="' + (item.image_url || '') + '" style="width:100%; height:150px; object-fit:cover;">' +
                     '<div style="padding:10px;">' +
                     '<div style="color:#4CAF50; font-weight:bold">' + item.price + '</div>' +
                     '<div style="font-size: 0.9rem;"><a href="' + item.url + '" target="_blank" style="color:#eee; text-decoration: none;">' + item.title + '</a></div>' +
+                    (Object.keys(structuredData).length > 0 ?
+                      '<div class="toggle-features" style="margin-top: 10px; cursor: pointer; color: #4CAF50; display: flex; align-items: center;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === \'none\' ? \'block\' : \'none\';">' +
+                      '<i class="fas fa-chevron-down" style="margin-right: 5px; font-size: 0.8em;"></i> Показать характеристики' +
+                      '</div>' : '') +
+                    featuresHtml +
                     '</div>' +
                     '</div>';
         }
