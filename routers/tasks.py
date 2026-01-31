@@ -3,7 +3,7 @@ from sqlmodel import Session, select
 from dependencies import get_session
 from schemas import SubmitData, LogMessage
 from database import SearchSession
-from services import ProcessingService
+from core.services import ProcessingService
 from image_utils import save_base64_image
 
 router = APIRouter(prefix="/api", tags=["tasks"])

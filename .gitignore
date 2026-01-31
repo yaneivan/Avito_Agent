@@ -7,3 +7,4 @@ QWEN.md
 qwen_tester/chat_history.json
 /routers/__pycache__
 /services/__pycache__
+/core/__pycache__

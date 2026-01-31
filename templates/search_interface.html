@@ -34,6 +34,20 @@
         if (chatIdParam) {
             currentChatId = chatIdParam;
             try {
+                // Сначала проверим, связан ли чат с сессией глубокого исследования
+                const researchCheckRes = await fetch(`/api/chats/${currentChatId}/deep_research_session`);
+
+                if (researchCheckRes.ok) {
+                    const researchData = await researchCheckRes.json();
+
+                    // Если чат связан с сессией глубокого исследования, перенаправляем на правильную страницу
+                    if (researchData && researchData.id) {
+                        window.location.href = `/deep_research?chat_id=${currentChatId}`;
+                        return;
+                    }
+                }
+
+                // Если чат не связан с сессией глубокого исследования, загружаем как обычный чат
                 const res = await fetch(`/api/chats/${currentChatId}`);
                 if (res.ok) {
                     const data = await res.json();

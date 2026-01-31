@@ -5,8 +5,8 @@ from dependencies import get_session
 from schemas import InterviewRequest
 from database import DeepResearchSession, SearchSession, ChatSession, ChatMessage, ExtractionSchema, Item, SearchItemLink
 from llm_engine import deep_research_agent, generate_schema_proposal
-from services import ProcessingService
-from services.orchestrator import confirm_search_schema
+from core.services import ProcessingService
+from core.orchestrator import confirm_search_schema
 
 # Важно: prefix="/api/deep_research"
 router = APIRouter(prefix="/api/deep_research", tags=["deep_research"])
@@ -394,7 +394,7 @@ def get_research_items(research_id: int, session: Session = Depends(get_session)
     ).all()
 
     if search_sessions:
-        search_ids = [s for s in search_sessions]
+        search_ids = [s.id for s in search_sessions]  # Исправлено: получаем id из объектов
         if search_ids:
             linked_items = session.exec(
                 select(Item)
@@ -402,23 +402,6 @@ def get_research_items(research_id: int, session: Session = Depends(get_session)
                 .where(SearchItemLink.search_id.in_(search_ids))
             ).all()
             items.extend(linked_items)
-
-    # Способ 2: Если товары не найдены через SearchItemLink, ищем товары,
-    # которые были созданы в результате обработки этой сессии глубокого исследования
-    # Для этого используем вспомогательную информацию в полях товаров или сессий
-    if not items:
-        # Попробуем найти товары, которые были обработаны в рамках этой сессии
-        # Это может быть сложно без прямой связи, но можно использовать косвенные признаки
-        # Например, товары, созданные примерно в то же время, что и сессия
-        from datetime import timedelta
-        research_session = session.get(DeepResearchSession, research_id)
-        if research_session:
-            # Находим товары, созданные в определённый период времени
-            # Это не идеальное решение, но может помочь в текущей ситуации
-            from sqlalchemy import func
-            # Попробуем найти товары, связанные с этой сессией через косвенные признаки
-            # Например, через содержимое поля raw_json или structured_data
-            pass  # Пока оставим как есть, так как это сложная логика
 
     res = []
     for i in items:

@@ -10,9 +10,8 @@
 
     <!-- Чат -->
     <div id="chat-section" class="chat-container" style="display: flex; flex-direction: column; background: #1a1a1a; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid #333; margin-bottom: 20px;">
-        <div class="chat-header" style="padding: 15px 20px; background: #222; border-bottom: 1px solid #333; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
+        <div class="chat-header" style="padding: 15px 20px; background: #222; border-bottom: 1px solid #333; font-weight: bold;">
             <span>Чат с агентом</span>
-            <div id="current-state" style="font-size: 0.8em; color: #aaa;">Стадия: интервью</div>
         </div>
         <div id="chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; max-height: 50vh; min-height: 300px;">
         </div>
@@ -53,7 +52,6 @@
     const progressBar = document.getElementById('progress-fill');
     const analysisSummary = document.getElementById('analysis-summary');
     const topItemsGrid = document.getElementById('top-items-grid');
-    const currentStateElement = document.getElementById('current-state');
 
     function addMsg(role, text, isHtml = false) {
         const div = document.createElement('div');
@@ -77,7 +75,17 @@
     function showStage(stage) {
         currentStage = stage;
         const stageNames = {'interview': 'Интервью', 'parsing': 'Сбор данных', 'analysis': 'Анализ', 'results': 'Результаты'};
-        if (currentStateElement) currentStateElement.textContent = `Стадия: ${stageNames[stage] || stage}`;
+        updateStatus(`${stageNames[stage] || stage}`, getProgressForStage(stage));
+    }
+
+    function getProgressForStage(stage) {
+        switch(stage) {
+            case 'interview': return 25;
+            case 'parsing': return 50;
+            case 'analysis': return 75;
+            case 'results': return 90;
+            default: return 0;
+        }
     }
 
     async function init() {
@@ -86,6 +94,20 @@
         if (chatIdParam) {
             currentChatId = chatIdParam;
             try {
+                // Сначала проверим, связан ли чат с сессией глубокого исследования
+                const researchRes = await fetch(`/api/chats/${currentChatId}/deep_research_session`);
+                let researchData = null;
+
+                if (researchRes.ok) {
+                    researchData = await researchRes.json();
+                }
+
+                // Если чат не связан с сессией глубокого исследования, перенаправляем на обычный интерфейс поиска
+                if (!researchData || !researchData.id) {
+                    window.location.href = `/?chat_id=${currentChatId}`;
+                    return;
+                }
+
                 const res = await fetch(`/api/chats/${currentChatId}`);
                 if (res.ok) {
                     const data = await res.json();
@@ -98,47 +120,38 @@
                         }
                     });
 
-                    // Попробуем получить связанную сессию глубокого исследования
-                    const researchRes = await fetch(`/api/chats/${currentChatId}/deep_research_session`);
-                    if (researchRes.ok) {
-                        const researchData = await researchRes.json();
-                        if (researchData && researchData.id) {
-                            deepResearchId = researchData.id;
+                    if (researchData && researchData.id) {
+                        deepResearchId = researchData.id;
 
-                            // Проверим статус сессии и покажем результаты, если они готовы
-                            const statusRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
-                            if (statusRes.ok) {
-                                const statusData = await statusRes.json();
+                        // Проверим статус сессии и покажем результаты, если они готовы
+                        const statusRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
+                        if (statusRes.ok) {
+                            const statusData = await statusRes.json();
 
-                                // Если сессия завершена, показываем результаты
-                                if (statusData.status === 'completed') {
+                            // Если сессия завершена, показываем результаты
+                            if (statusData.status === 'completed') {
+                                showStage('results');
+                                updateStatus('Анализ завершен', 100);
+
+                                if (statusData.summary) {
+                                    analysisSummary.innerHTML = marked.parse(statusData.summary);
+                                }
+
+                                const itemsRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
+                                if (itemsRes.ok) {
+                                    const items = await itemsRes.json();
+                                    renderTopItemsGrid(items);
+                                }
+                            } else {
+                                // Если сессия не завершена, проверяем текущую стадию
+                                if (statusData.stage === 'parsing') {
+                                    showStage('parsing');
+                                } else if (statusData.stage === 'analysis') {
+                                    showStage('analysis');
+                                } else if (statusData.stage === 'results') {
                                     showStage('results');
-                                    updateStatus('Анализ завершен', 100);
-
-                                    if (statusData.summary) {
-                                        analysisSummary.innerHTML = marked.parse(statusData.summary);
-                                    }
-
-                                    const itemsRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
-                                    if (itemsRes.ok) {
-                                        const items = await itemsRes.json();
-                                        renderTopItemsGrid(items);
-                                    }
                                 } else {
-                                    // Если сессия не завершена, проверяем текущую стадию
-                                    if (statusData.stage === 'parsing') {
-                                        showStage('parsing');
-                                        updateStatus('Сбор данных...', 50);
-                                    } else if (statusData.stage === 'analysis') {
-                                        showStage('analysis');
-                                        updateStatus('Анализ результатов...', 75);
-                                    } else if (statusData.stage === 'results') {
-                                        showStage('results');
-                                        updateStatus('Формирование отчета...', 90);
-                                    } else {
-                                        showStage('interview');
-                                        updateStatus('Интервью - сбор требований', 25);
-                                    }
+                                    showStage('interview');
                                 }
                             }
                         }
@@ -180,7 +193,7 @@
                 const welcome = "Привет! Я помогу вам провести глубокий анализ рынка.";
                 addMsg('assistant', welcome);
                 deepHistory.push({role: "assistant", content: welcome});
-                updateStatus('Интервью - сбор требований', 25);
+                showStage('interview');
             }
         }
     }
@@ -209,7 +222,6 @@
                 addMsg('assistant', data.message);
                 deepResearchId = data.research_id;
                 showStage('parsing');
-                updateStatus('Сбор данных...', 50);
                 startParsingPhase();
             } else if (data.type === 'interview') {
                 let msgText = data.message;
@@ -263,9 +275,9 @@
     async function startParsingPhase() {
         try {
             await fetch(`/api/deep_research/start_parsing?research_id=${deepResearchId}`, {method: 'POST'});
-            updateStatus('Сбор данных...', 50);
+            showStage('parsing');
             setTimeout(() => {
-                updateStatus('Анализ результатов...', 75);
+                showStage('analysis');
                 fetchAnalysisResults();
             }, 3000);
         } catch (e) { console.error(e); }
@@ -286,7 +298,7 @@
                 if (statusData.stage === 'parsing' || statusData.stage === 'analysis' || statusData.stage === 'completed' ||
                     statusData.status === 'processing' || statusData.status === 'completed') {
                     // Переходим к отображению результатов
-                    updateStatus('Анализ результатов...', 75);
+                    showStage('analysis');
                     fetchAnalysisResults();
                 } else {
                     // Продолжаем опрашивать статус каждые 3 секунды
@@ -319,19 +331,16 @@
 
             const sRes = await fetch(`/api/deep_research/status/${deepResearchId}`);
             const sData = await sRes.json();
-            
+
             if (sData.summary) {
                 analysisSummary.innerHTML = marked.parse(sData.summary);
             }
-            
-            updateStatus('Формирование отчета...', 90);
-            
+
+            showStage('results');
+
             const iRes = await fetch(`/api/deep_research/items/${deepResearchId}`);
             const items = await iRes.json();
             renderTopItemsGrid(items);
-            
-            updateStatus('Анализ завершен', 100);
-            showStage('results');
         } catch (e) { console.error(e); }
     }
 
