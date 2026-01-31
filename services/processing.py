@@ -73,20 +73,25 @@ class ProcessingService:
                                 db_item.title, db_item.description or "", db_item.price,
                                 db_item.image_path or "", s_req.query_text, extraction_schema
                             )
+
+                            # Проверяем, что vlm - это словарь, а не строка
+                            if isinstance(vlm, str):
+                                print(f"[ERROR SERVICE] VLM returned string instead of dict: {vlm}")
+                                vlm = {}
                             print(f"[DEBUG SERVICE] VLM result: {vlm}")
-                            print(f"[DEBUG SERVICE] VLM specs: {vlm.get('specs', 'No specs found')}")
+                            print(f"[DEBUG SERVICE] VLM specs: {vlm.get('specs', 'No specs found') if isinstance(vlm, dict) else 'VLM result is not a dict'}")
 
                             # Обновляем элемент в отдельной транзакции, чтобы избежать блокировок
                             with Session(engine) as update_session:
                                 update_item = update_session.get(Item, db_item.id)
                                 if update_item:
-                                    update_item.relevance_score = vlm.get("relevance_score", 1)
-                                    update_item.visual_notes = vlm.get("visual_notes", "")
+                                    update_item.relevance_score = vlm.get("relevance_score", 1) if isinstance(vlm, dict) else 1
+                                    update_item.visual_notes = vlm.get("visual_notes", "") if isinstance(vlm, dict) else ""
 
                                     # Решаем, какие структурированные данные сохранить:
                                     # 1. Если VLM вернул спецификации, используем их
                                     # 2. Иначе используем оригинальные данные из расширения
-                                    specs_data = vlm.get("specs", {})
+                                    specs_data = vlm.get("specs", {}) if isinstance(vlm, dict) else {}
                                     if not specs_data and hasattr(item_dto, 'structured_data') and item_dto.structured_data:
                                         print(f"[DEBUG SERVICE] Using original structured_data from extension: {item_dto.structured_data}")
                                         specs_data = item_dto.structured_data
@@ -128,22 +133,66 @@ class ProcessingService:
                                     link_session.add(SearchItemLink(search_id=s_req.id, item_id=db_item.id))
                                     link_session.commit()
                         elif isinstance(s_req, DeepResearchSession):
-                            # Для DeepResearchSession создаем SearchSession и линкуем к ней
+                            # Для DeepResearchSession находим связанные SearchSession и линкуем к ним
                             with Session(engine) as link_session:
-                                # Создаем временную SearchSession и линкуем элемент
-                                temp_search_session = SearchSession(
-                                    query_text=s_req.query_text,
-                                    deep_research_session_id=s_req.id,
-                                    status="completed",
-                                    stage="completed"
-                                )
-                                link_session.add(temp_search_session)
-                                link_session.commit()
-                                link_session.refresh(temp_search_session)
+                                # Находим все SearchSession, связанные с этой DeepResearchSession
+                                related_search_sessions = link_session.exec(
+                                    select(SearchSession).where(SearchSession.deep_research_session_id == s_req.id)
+                                ).all()
 
-                                if not link_session.exec(select(SearchItemLink).where(SearchItemLink.search_id==temp_search_session.id, SearchItemLink.item_id==db_item.id)).first():
-                                    link_session.add(SearchItemLink(search_id=temp_search_session.id, item_id=db_item.id))
-                                    link_session.commit()
+                                # Если есть связанные SearchSession, линкуем к ним
+                                if related_search_sessions:
+                                    for search_session in related_search_sessions:
+                                        if not link_session.exec(select(SearchItemLink).where(
+                                            SearchItemLink.search_id == search_session.id,
+                                            SearchItemLink.item_id == db_item.id
+                                        )).first():
+                                            link_session.add(SearchItemLink(search_id=search_session.id, item_id=db_item.id))
+                                            link_session.commit()
+                                else:
+                                    # Если нет связанных SearchSession, создаем новую
+                                    # Но сначала проверим, не является ли текущая сессия SearchSession,
+                                    # которая просто была загружена как DeepResearchSession из-за логики в начале функции
+
+                                    # На самом деле, если мы здесь, то s_req - это DeepResearchSession
+                                    # Нам нужно создать или найти подходящую SearchSession
+
+                                    # Попробуем найти SearchSession, которая уже существует и связана с этим DeepResearchSession
+                                    # Это может быть случай, если сессия была создана ранее
+                                    existing_search_session = link_session.exec(
+                                        select(SearchSession)
+                                        .where(SearchSession.deep_research_session_id == s_req.id)
+                                    ).first()
+
+                                    if existing_search_session:
+                                        # Используем существующую сессию
+                                        search_session = existing_search_session
+                                        # Связываем товар с найденной сессией
+                                        if not link_session.exec(select(SearchItemLink).where(
+                                            SearchItemLink.search_id == search_session.id,
+                                            SearchItemLink.item_id == db_item.id
+                                        )).first():
+                                            link_session.add(SearchItemLink(search_id=search_session.id, item_id=db_item.id))
+                                            link_session.commit()
+                                    else:
+                                        # Создаем новую
+                                        search_session = SearchSession(
+                                            query_text=s_req.query_text,
+                                            deep_research_session_id=s_req.id,
+                                            status="completed",
+                                            stage="completed"
+                                        )
+                                        link_session.add(search_session)
+                                        link_session.commit()
+                                        link_session.refresh(search_session)
+
+                                        # Связываем товар с найденной/созданной сессией
+                                        if not link_session.exec(select(SearchItemLink).where(
+                                            SearchItemLink.search_id == search_session.id,
+                                            SearchItemLink.item_id == db_item.id
+                                        )).first():
+                                            link_session.add(SearchItemLink(search_id=search_session.id, item_id=db_item.id))
+                                            link_session.commit()
                     else:
                         print(f"[DEBUG SERVICE] Filtered out item: {db_item.title} (Score 0)")
 
@@ -197,6 +246,17 @@ class ProcessingService:
                         updated_session.summary = s_req.summary
                         updated_session.reasoning = s_req.reasoning
                         status_session.add(updated_session)
+
+                        # Если это часть глубокого исследования, обновляем также и родительскую сессию
+                        if updated_session.deep_research_session_id:
+                            dr_session = status_session.get(DeepResearchSession, updated_session.deep_research_session_id)
+                            if dr_session:
+                                dr_session.status = "completed"
+                                dr_session.stage = "completed"
+                                dr_session.summary = s_req.summary
+                                dr_session.reasoning = s_req.reasoning
+                                status_session.add(dr_session)
+
                 elif isinstance(s_req, DeepResearchSession):
                     updated_session = status_session.get(DeepResearchSession, s_req.id)
                     if updated_session:

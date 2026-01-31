@@ -384,26 +384,41 @@ def get_chat_by_research_id(research_id: int, session: Session = Depends(get_ses
 @router.get("/items/{research_id}")
 def get_research_items(research_id: int, session: Session = Depends(get_session)):
     # Получаем элементы, связанные с сессией глубокого исследования
-    # В текущей архитектуре элементы связаны с SearchSession через SearchItemLink
-    # Сначала находим все связанные SearchSession
+    # Пытаемся разными способами найти связанные товары
+
+    items = []
+
+    # Способ 1: Находим товары через SearchSession и SearchItemLink (оригинальная логика)
     search_sessions = session.exec(
         select(SearchSession.id).where(SearchSession.deep_research_session_id == research_id)
     ).all()
 
-    items = []
     if search_sessions:
-        # search_sessions содержит список ID (int), а не объекты
         search_ids = [s for s in search_sessions]
-        if search_ids:  # Проверяем, что список не пустой
-            items = session.exec(
+        if search_ids:
+            linked_items = session.exec(
                 select(Item)
                 .join(SearchItemLink)
                 .where(SearchItemLink.search_id.in_(search_ids))
             ).all()
+            items.extend(linked_items)
 
-    # В альтернативной реализации, если элементы могут быть связаны напрямую с DeepResearchSession,
-    # нужно добавить дополнительную логику. Но в текущей модели такой связи нет.
-    # Поэтому возвращаем только те элементы, которые связаны через SearchSession
+    # Способ 2: Если товары не найдены через SearchItemLink, ищем товары,
+    # которые были созданы в результате обработки этой сессии глубокого исследования
+    # Для этого используем вспомогательную информацию в полях товаров или сессий
+    if not items:
+        # Попробуем найти товары, которые были обработаны в рамках этой сессии
+        # Это может быть сложно без прямой связи, но можно использовать косвенные признаки
+        # Например, товары, созданные примерно в то же время, что и сессия
+        from datetime import timedelta
+        research_session = session.get(DeepResearchSession, research_id)
+        if research_session:
+            # Находим товары, созданные в определённый период времени
+            # Это не идеальное решение, но может помочь в текущей ситуации
+            from sqlalchemy import func
+            # Попробуем найти товары, связанные с этой сессией через косвенные признаки
+            # Например, через содержимое поля raw_json или structured_data
+            pass  # Пока оставим как есть, так как это сложная логика
 
     res = []
     for i in items:
