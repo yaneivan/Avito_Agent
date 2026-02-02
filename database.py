@@ -1,128 +1,78 @@
-import os
-from typing import Optional, List
-from sqlmodel import Field, SQLModel, create_engine, Relationship
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
-from dotenv import load_dotenv
+import os
 
-# Load environment variables from .env file
-load_dotenv()
+# Создаем папку для данных, если её нет
+os.makedirs("./data", exist_ok=True)
 
-class SearchItemLink(SQLModel, table=True):
-    search_id: int = Field(foreign_key="searchsession.id", primary_key=True)
-    item_id: int = Field(foreign_key="item.id", primary_key=True)
+SQLALCHEMY_DATABASE_URL = "sqlite:///./data/avito_agent.db"
 
-class ExtractionSchema(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    description: str
-    structure_json: str
-    searches: List["SearchSession"] = Relationship(back_populates="schema_model")
-    deep_research_sessions: List["DeepResearchSession"] = Relationship(back_populates="schema_model")
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-class ChatSession(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    title: str = Field(default="Новый чат")  # Title for the chat session
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-
-    # Relationship to chat messages
-    messages: List["ChatMessage"] = Relationship(back_populates="chat_session", cascade_delete=True)
-
-    # Relationship to deep research session (one-to-one)
-    deep_research_session: Optional["DeepResearchSession"] = Relationship(back_populates="chat_session")
-
-class ChatMessage(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    role: str  # "user" or "assistant"
-    content: str
-    timestamp: datetime = Field(default_factory=datetime.now)
-    # Type of message (optional, for categorizing different types of responses)
-    message_type: Optional[str] = None
-    # Reference to the chat session this message belongs to
-    chat_session_id: int = Field(foreign_key="chatsession.id")
-    chat_session: Optional[ChatSession] = Relationship(back_populates="messages")
-    # Additional metadata (optional)
-    extra_metadata: Optional[str] = None  # JSON string for additional data
-
-class DeepResearchSession(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    query_text: str
-    status: str = Field(default="created")  # Status: "created", "interview", "parsing", "analysis", "completed"
-    stage: str = Field(default="interview")  # Stage: "interview", "schema_agreement", "parsing", "analysis", "completed"
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
-
-    # Настройки
-    limit_count: int = Field(default=int(os.getenv("DEFAULT_LIMIT_COUNT", "20")))
-    open_in_browser: bool = Field(default=True)
-    use_cache: bool = Field(default=False)
-
-    # Результат анализа
-    summary: Optional[str] = None  # Сводка результатов
-    reasoning: Optional[str] = None  # Объяснение решения LLM
-    internal_thoughts: Optional[str] = None  # Внутренние размышления LLM
-    interview_data: Optional[str] = None  # JSON string storing interview responses
-    schema_agreed: Optional[str] = None  # JSON string storing agreed schema
-    analysis_result: Optional[str] = None  # Analysis result for deep research
-
-    schema_id: Optional[int] = Field(default=None, foreign_key="extractionschema.id")
-    schema_model: Optional[ExtractionSchema] = Relationship(back_populates="deep_research_sessions")
-
-    # Связь с чатом
-    chat_session_id: Optional[int] = Field(default=None, foreign_key="chatsession.id")
-    chat_session: Optional[ChatSession] = Relationship(back_populates="deep_research_session")
-
-    # Связь с поисковыми сессиями (для поисков, созданных в рамках глубокого исследования)
-    search_sessions: List["SearchSession"] = Relationship(back_populates="deep_research_session")
+Base = declarative_base()
 
 
-class SearchSession(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    query_text: str
-    status: str = Field(default="created")  # Changed default from "pending" to "created" to prevent premature processing
-    mode: str = Field(default="quick")  # Mode: "quick" - для простых поисков
-    stage: str = Field(default="parsing")  # Stage for quick mode: "parsing", "completed"
-    created_at: datetime = Field(default_factory=datetime.now)
+class DBMarketResearch(Base):
+    __tablename__ = "market_research"
 
-    # Настройки
-    limit_count: int = Field(default=int(os.getenv("DEFAULT_LIMIT_COUNT", "20")))
-    open_in_browser: bool = Field(default=True)
-    use_cache: bool = Field(default=False)
+    id = Column(Integer, primary_key=True, index=True)
+    state = Column(String, index=True)
+    chat_history = Column(Text)  # JSON history as text
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Результат анализа (ответ чата)
-    summary: Optional[str] = None # <-- НОВОЕ ПОЛЕ
-    reasoning: Optional[str] = None  # Объяснение решения LLM
-    internal_thoughts: Optional[str] = None  # Внутренние размышления LLM
-    analysis_result: Optional[str] = None  # Analysis result for quick search
 
-    # Связь с глубоким исследованием (для поисков, созданных в рамках глубокого исследования)
-    deep_research_session_id: Optional[int] = Field(default=None, foreign_key="deepresearchsession.id")
-    deep_research_session: Optional["DeepResearchSession"] = Relationship(back_populates="search_sessions")
+class DBSchema(Base):
+    __tablename__ = "schemas"
 
-    schema_id: Optional[int] = Field(default=None, foreign_key="extractionschema.id")
-    schema_model: Optional[ExtractionSchema] = Relationship(back_populates="searches")
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(Text)
+    json_schema = Column(Text)  # JSON schema as text
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-    items: List["Item"] = Relationship(back_populates="searches", link_model=SearchItemLink)
 
-class Item(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    url: str = Field(unique=True, index=True)
-    title: str
-    price: str
-    description: Optional[str] = None
-    image_path: Optional[str] = None
-    raw_json: str
-    structured_data: Optional[str] = None
-    relevance_score: int = 0  # По умолчанию 0, будет обновлено после анализа
-    visual_notes: Optional[str] = None  # Описание визуального состояния товара
+class DBRawLot(Base):
+    __tablename__ = "raw_lots"
 
-    searches: List[SearchSession] = Relationship(back_populates="items", link_model=SearchItemLink)
-    # Удаляем двойную ссылку через SearchItemLink, так как она создает конфликт
-    # Связь с DeepResearchSession осуществляется через SearchSession
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String, unique=True, index=True)
+    title = Column(String)
+    price = Column(String)
+    description = Column(Text)
+    image_path = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-sqlite_file_name = os.getenv("DATABASE_FILE_NAME", "database.db")
-sqlite_url = f"sqlite:///{sqlite_file_name}"
-engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
+class DBAnalyzedLot(Base):
+    __tablename__ = "analyzed_lots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    raw_lot_id = Column(Integer, ForeignKey("raw_lots.id"))
+    schema_id = Column(Integer, ForeignKey("schemas.id"))
+    structured_data = Column(Text)  # JSON data as text
+    visual_notes = Column(Text)
+    image_description = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DBSearchTask(Base):
+    __tablename__ = "search_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    market_research_id = Column(Integer, ForeignKey("market_research.id"))
+    mode = Column(String)  # "quick" or "deep"
+    query = Column(String)
+    schema_id = Column(Integer, ForeignKey("schemas.id"), nullable=True)
+    needs_visual = Column(Boolean, default=False)
+    limit = Column(Integer, default=10)  # Количество товаров для поиска
+    status = Column(String, default="pending")  # "pending", "in_progress", "completed", "failed"
+    results = Column(Text, nullable=True)  # JSON results as text
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# Создаем таблицы
+Base.metadata.create_all(bind=engine)

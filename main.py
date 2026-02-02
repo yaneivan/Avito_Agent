@@ -1,53 +1,27 @@
-import os
-import logging
-from fastapi import FastAPI, Request
+"""
+Основной файл запуска приложения
+"""
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from database import create_db_and_tables
-from contextlib import asynccontextmanager
+from api.router import router
+import uvicorn
 
-from routers import chat, deep_research, tasks, views
+app = FastAPI(title="Avito Agent")
 
-# --- НАСТРОЙКА ЛОГОВ ---
-class EndpointFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        # Скрываем успешные (200 OK) запросы к системным эндпоинтам и статике
-        if "/api/get_task" in msg and "200" in msg: return False
-        if "GET /api/chats" in msg and "200" in msg: return False
-        if "GET /api/searches" in msg and "200" in msg: return False
-        if "GET /images" in msg and "200" in msg: return False
-        if "POST /api/log" in msg and "200" in msg: return False
-        return True
-
-# Применяем фильтр
-logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("--- SERVER STARTUP ---")
-    create_db_and_tables()
-    os.makedirs("images", exist_ok=True)
-    yield
-
-app = FastAPI(lifespan=lifespan)
-
-app.mount("/images", StaticFiles(directory="images"), name="images")
-
+# Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # В продакшене укажите конкретные домены
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
-app.include_router(views.router)
-app.include_router(chat.router)
-app.include_router(deep_research.router)
-app.include_router(tasks.router)
+app.include_router(router, prefix="/api")
+
+# Подключаем статические файлы для нашего нового фронтенда
+app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 if __name__ == "__main__":
-    import uvicorn
-    # Запускаем на 8001
-    uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

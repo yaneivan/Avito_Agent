@@ -1,28 +1,23 @@
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+# conftest.py
 import pytest
-from sqlmodel import Session, create_engine
-from sqlmodel.pool import StaticPool
-from database import SQLModel
-from main import app
-from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 
-@pytest.fixture(name="session")
-def session_fixture():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(bind=engine)
-    with Session(engine) as session:
-        yield session
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_environment():
+    """Фикстура для настройки тестовой среды"""
+    # Здесь можно выполнить настройку перед запуском всех тестов
+    print("Настройка тестовой среды...")
+    
+    # Мокаем конфигурацию для тестов
+    with patch.dict('os.environ', {
+        'DATABASE_URL': 'sqlite:///./test_avito_agent.db',
+        'LOCAL_LLM_URL': 'http://localhost:8080/v1',
+        'LOCAL_LLM_API_KEY': 'not-needed',
+        'LOCAL_LLM_MODEL': 'Qwen3-Vl-4B-Instruct'
+    }):
+        yield
+        print("Очистка после тестов...")
 
 
-@pytest.fixture(name="client")
-def client_fixture():
-    client = TestClient(app)
-    yield client
+# Можно добавить другие общие фикстуры здесь

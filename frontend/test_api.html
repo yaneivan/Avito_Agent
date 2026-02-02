@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест API</title>
+</head>
+<body>
+    <h1>Тест API Avito Agent</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testApi() {
+            const resultsDiv = document.getElementById('results');
+            
+            try {
+                // Тестируем создание нового исследования
+                resultsDiv.innerHTML += '<p>Тестируем создание исследования...</p>';
+                
+                const response = await fetch('/api/market_research', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        initial_query: 'тестовый запрос'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    resultsDiv.innerHTML += `<p>✓ Исследование создано: ID ${data.id}</p>`;
+                    
+                    // Тестируем получение исследования
+                    resultsDiv.innerHTML += '<p>Тестируем получение исследования...</p>';
+                    
+                    const getResponse = await fetch(`/api/market_research/${data.id}`);
+                    if (getResponse.ok) {
+                        const getData = await getResponse.json();
+                        resultsDiv.innerHTML += `<p>✓ Исследование получено: ${getData.state}</p>`;
+                    } else {
+                        resultsDiv.innerHTML += `<p>✗ Ошибка получения исследования: ${getResponse.status}</p>`;
+                    }
+                } else {
+                    resultsDiv.innerHTML += `<p>✗ Ошибка создания исследования: ${response.status}</p>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML += `<p>✗ Ошибка: ${error.message}</p>`;
+            }
+        }
+        
+        // Запускаем тест
+        testApi();
+    </script>
+</body>
+</html>
