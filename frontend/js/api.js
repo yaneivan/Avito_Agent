@@ -6,11 +6,11 @@
 const API_BASE_URL = '/api';
 
 /**
- * Создание нового исследования рынка
- * @param {string} query - Поисковый запрос
- * @returns {Promise<Object>} - Объект исследования
+ * Создание нового исследования
+ * @param {string} initialQuery - Начальный запрос
+ * @returns {Promise<Object>} - Созданное исследование
  */
-async function createMarketResearch(query) {
+async function createMarketResearch(initialQuery) {
     try {
         const response = await fetch(`${API_BASE_URL}/market_research`, {
             method: 'POST',
@@ -18,7 +18,7 @@ async function createMarketResearch(query) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                initial_query: query
+                initial_query: initialQuery
             })
         });
 
@@ -33,6 +33,71 @@ async function createMarketResearch(query) {
         throw error;
     }
 }
+
+/**
+ * Отправка сообщения в существующее исследование
+ * @param {string} message - Текст сообщения
+ * @param {number} mrId - ID существующего исследования
+ * @returns {Promise<Object>} - Обновленное состояние исследования
+ */
+async function sendMessageToResearch(message, mrId) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                message: message,
+                mr_id: mrId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ошибка отправки сообщения: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('Ошибка при отправке сообщения:', error);
+        alert('Ошибка соединения с сервером. Проверьте, запущен ли backend.');
+        throw error;
+    }
+}
+
+
+/**
+ * Создание нового исследования
+ */
+async function startNewResearch(message) {
+    const response = await fetch(`${API_BASE_URL}/market_research`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({initial_query: message})
+    });
+    if (!response.ok) throw new Error(`Ошибка создания: ${response.status}`);
+    return await response.json();
+}
+
+/**
+ * Отправка сообщения в существующее исследование
+ */
+async function sendChatMessage(mrId, message) {
+    const response = await fetch(`${API_BASE_URL}/chat/${mrId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: message})
+    });
+    if (!response.ok) throw new Error(`Ошибка отправки: ${response.status}`);
+    return await response.json();
+}
+
+// Экспорт (оставить getMarketResearch)
+window.Api = {
+    startNewResearch,
+    sendChatMessage,
+    getMarketResearch
+};
 
 /**
  * Получение информации о текущем исследовании
@@ -63,69 +128,79 @@ async function getMarketResearch(id) {
 }
 
 /**
- * Отправка сообщения в чат
- * @param {number} id - ID исследования
- * @param {string} text - Текст сообщения
- * @returns {Promise<Object>} - Обновленное состояние исследования
+ * Модуль для polling состояния исследования
  */
-async function sendMessage(id, text) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/chat/${id}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                message: text
-            })
-        });
+class ResearchPoller {
+    constructor() {
+        this.pollingInterval = null;
+        this.isPolling = false;
+        this.pollingCallbacks = [];
+    }
 
-        if (!response.ok) {
-            throw new Error(`Ошибка отправки сообщения: ${response.status}`);
+    /**
+     * Начать polling исследования
+     * @param {number} mrId - ID исследования
+     * @param {number} interval - Интервал в миллисекундах (по умолчанию 2 секунды)
+     */
+    startPolling(mrId, interval = 2000) {
+        // Останавливаем предыдущий polling, если был
+        this.stopPolling();
+        
+        console.log(`Начинаем polling исследования ${mrId} с интервалом ${interval}мс`);
+        
+        this.isPolling = true;
+        this.pollingInterval = setInterval(async () => {
+            try {
+                const research = await getMarketResearch(mrId);
+                
+                // Вызываем все зарегистрированные коллбэки
+                this.pollingCallbacks.forEach(callback => {
+                    callback(research);
+                });
+                
+            } catch (error) {
+                console.error('Ошибка при polling:', error);
+            }
+        }, interval);
+    }
+
+    /**
+     * Остановить polling
+     */
+    stopPolling() {
+        if (this.pollingInterval) {
+            console.log('Останавливаем polling');
+            clearInterval(this.pollingInterval);
+            this.pollingInterval = null;
+            this.isPolling = false;
         }
+    }
 
-        return await response.json();
-    } catch (error) {
-        console.error('Ошибка при отправке сообщения:', error);
-        throw error;
+    /**
+     * Зарегистрировать коллбэк для обновлений
+     * @param {Function} callback - Функция, которая будет вызвана при каждом обновлении
+     */
+    onUpdate(callback) {
+        this.pollingCallbacks.push(callback);
+    }
+
+    /**
+     * Удалить коллбэк
+     * @param {Function} callback - Функция для удаления
+     */
+    removeCallback(callback) {
+        const index = this.pollingCallbacks.indexOf(callback);
+        if (index > -1) {
+            this.pollingCallbacks.splice(index, 1);
+        }
     }
 }
 
-/**
- * Унифицированный чат-эндпоинт (фасад)
- * @param {string} message - Текст сообщения
- * @param {number|null} mrId - ID существующего исследования (опционально)
- * @returns {Promise<Object>} - Обновленное состояние исследования
- */
-async function unifiedChat(message, mrId = null) {
-    try {
-        const response = await fetch(`${API_BASE_URL}/chat`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                message: message,
-                mr_id: mrId
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`Ошибка чата: ${response.status}`);
-        }
-
-        return await response.json();
-    } catch (error) {
-        console.error('Ошибка при чате:', error);
-        alert('Ошибка соединения с сервером. Проверьте, запущен ли backend.');
-        throw error;
-    }
-}
+// Создаем глобальный экземпляр
+window.ResearchPoller = new ResearchPoller();
 
 // Экспортируем функции для использования в других модулях
 window.Api = {
-    createMarketResearch,
-    getMarketResearch,
-    sendMessage,
-    unifiedChat
+    unifiedChat,
+    getMarketResearch
 };

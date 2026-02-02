@@ -18,6 +18,7 @@ from models.research_models import (
 from typing import List, Optional
 import json
 from datetime import datetime
+from utils.logger import logger
 
 
 class MarketResearchRepository:
@@ -46,7 +47,9 @@ class MarketResearchRepository:
     def get_by_id(self, mr_id: int) -> Optional[MarketResearch]:
         db_mr = self.db.query(DBMarketResearch).filter(DBMarketResearch.id == mr_id).first()
         if not db_mr:
+            logger.warning(f"Исследование с ID {mr_id} не найдено")
             return None
+
 
         # Загружаем историю чата
         chat_history = []
@@ -75,7 +78,7 @@ class MarketResearchRepository:
                 created_at=task.created_at
             ))
 
-        return MarketResearch(
+        result = MarketResearch(
             id=db_mr.id,
             state=State(db_mr.state),
             chat_history=chat_history,
@@ -83,6 +86,8 @@ class MarketResearchRepository:
             created_at=db_mr.created_at,
             updated_at=db_mr.updated_at
         )
+
+        return result
 
     def update_state(self, mr_id: int, new_state: State) -> Optional[MarketResearch]:
         db_mr = self.db.query(DBMarketResearch).filter(DBMarketResearch.id == mr_id).first()
@@ -97,8 +102,11 @@ class MarketResearchRepository:
         return self.get_by_id(mr_id)
 
     def update(self, market_research: MarketResearch) -> Optional[MarketResearch]:
+        logger.info(f"Начало обновления исследования {market_research.id} с {len(market_research.chat_history)} сообщениями")
+
         db_mr = self.db.query(DBMarketResearch).filter(DBMarketResearch.id == market_research.id).first()
         if not db_mr:
+            logger.warning(f"Исследование с ID {market_research.id} не найдено для обновления")
             return None
 
         # Функция для сериализации объектов datetime
@@ -109,15 +117,26 @@ class MarketResearchRepository:
 
         # Обновляем состояние и историю чата
         db_mr.state = market_research.state.value
-        db_mr.chat_history = json.dumps([msg.dict() for msg in market_research.chat_history], default=serialize_datetime)
+        serialized_history = [msg.dict() for msg in market_research.chat_history]
+        logger.info(f"Сериализованная история содержит {len(serialized_history)} записей")
+        db_mr.chat_history = json.dumps(serialized_history, default=serialize_datetime)
+        logger.info(f"JSON истории сохранен в базу данных")
 
         # Обновляем время
         db_mr.updated_at = db_mr.updated_at
 
         self.db.commit()
-        self.db.refresh(db_mr)
+        logger.info(f"Транзакция сохранена в базе данных")
 
-        return self.get_by_id(market_research.id)
+        self.db.refresh(db_mr)
+        logger.info(f"Объект в сессии обновлен")
+
+        result = self.get_by_id(market_research.id)
+        logger.info(f"Возвращаемое исследование содержит {len(result.chat_history if result else [])} сообщений")
+        if result:
+            logger.info(f"Содержимое возвращаемой истории: {[msg.content for msg in result.chat_history]}")
+
+        return result
 
 
 class SchemaRepository:

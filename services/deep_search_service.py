@@ -11,8 +11,9 @@ from repositories.research_repository import (
 from services.tournament_service import tournament_ranking
 from utils.image_handler import save_image_from_base64
 from utils.logger import logger
-from .visual_analysis_service import VisualAnalysisService
 import json
+import copy
+import base64
 
 
 class DeepSearchService:
@@ -23,14 +24,12 @@ class DeepSearchService:
         schema_repo: SchemaRepository,
         raw_lot_repo: RawLotRepository,
         analyzed_lot_repo: AnalyzedLotRepository,
-        visual_service: VisualAnalysisService
     ):
         self.mr_repo = mr_repo
         self.task_repo = task_repo
         self.schema_repo = schema_repo
         self.raw_lot_repo = raw_lot_repo
         self.analyzed_lot_repo = analyzed_lot_repo
-        self.visual_service = visual_service
 
     def handle_deep_search_results(self, task_id: int, raw_results: List[dict]) -> MarketResearch:
         """Обработка результатов глубокого поиска"""
@@ -112,60 +111,58 @@ class DeepSearchService:
 
         from utils.llm_client import get_completion
 
+
+        full_schema = copy.deepcopy(schema.json_schema)
+        full_schema.update({"relevance_note":"Why this lot is good/bad for user.", 
+                            "image_description_and_notes": "Relevant information from the image - colors, details, condition"})
+
+
         # Формируем сообщение для LLM
         messages = [
             {
                 "role": "system",
-                "content": f"""Извлеки информацию из описания товара в соответствии со следующей JSON-схемой: {json.dumps(schema.json_schema)}
+                "content": f"""Извлеки информацию из описания товара в соответствии со следующей JSON-схемой: {json.dumps(full_schema)}
                 Возвращай только JSON в соответствии со схемой."""
             },
-            {
-                "role": "user",
-                "content": f"Название: {raw_lot.title}\nОписание: {raw_lot.description}\nЦена: {raw_lot.price}"
-            }
         ]
 
-        # Если есть изображение, добавляем его в сообщение для LLM
+        user_content = [{"type": "text", "text": f"Title: {raw_lot.title}\nDesc: {raw_lot.description}\nPrice: {raw_lot.price}"}]
+        
+        
+        # 3. Фото-логика (подключаемая)
         if raw_lot.image_path:
-            # В реальной реализации нужно будет закодировать изображение в base64
-            # и добавить к сообщению, если модель поддерживает визуальный ввод
-            import base64
             try:
-                with open(raw_lot.image_path, "rb") as img_file:
-                    img_base64 = base64.b64encode(img_file.read()).decode('utf-8')
-
-                # Добавляем изображение к последнему сообщению
-                messages[-1]["content"] = [
-                    {"type": "text", "text": f"Название: {raw_lot.title}\nОписание: {raw_lot.description}\nЦена: {raw_lot.price}"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
-                ]
+                with open(raw_lot.image_path, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode('utf-8')
+                user_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
             except Exception as e:
-                logger.error(f"Ошибка при чтении изображения для лота {raw_lot.id}: {e}")
+                logger.error(f"Image error: {e}")
+        else:
+            user_content.append({"type": "text", "text": "(NO PHOTO provided for this lot. Put 'N/A' in image_description_and_notes)"})
+
+        messages.append({"role": "user", "content": user_content})
 
         response = get_completion(messages)
 
         # Парсим ответ от LLM
         try:
             structured_data = json.loads(response.content)
+            
         except json.JSONDecodeError:
             # Если LLM вернул неправильный JSON, используем хотя бы частичные данные
             # В реальной реализации нужно будет обработать ошибку и, возможно, повторить запрос
             logger.error(f"LLM вернул некорректный JSON для лота {raw_lot.id}")
             structured_data = {}
 
-        # Также извлекаем визуальные заметки (если есть изображение)
-        visual_notes = ""
-        image_description = ""
-        if raw_lot.image_path:
-            # Выполняем визуальный анализ изображения с помощью LLM
-            visual_notes, image_description = self.visual_service.analyze_visual_features(raw_lot.image_path)
+        relevance_note = structured_data.pop("relevance_note", "No note")
+        image_description_and_notes = structured_data.pop("image_description_and_notes", "No visual info")
 
         analyzed_lot = AnalyzedLot(
             raw_lot_id=raw_lot.id,
             schema_id=schema.id,
             structured_data=structured_data,
-            visual_notes=visual_notes,
-            image_description=image_description
+            relevance_note=relevance_note,
+            image_description_and_notes=image_description_and_notes
         )
 
         return analyzed_lot

@@ -41,6 +41,8 @@ def create_service_with_session(db: Session) -> MarketResearchService:
     service.schema_repo = SchemaRepository(db)
     service.raw_lot_repo = RawLotRepository(db)
     service.analyzed_lot_repo = AnalyzedLotRepository(db)
+    # Обновляем репозиторий в чат-сервисе
+    service.chat_service.mr_repo = service.mr_repo
     return service
 
 @router.post("/market_research", response_model=MarketResearch)
@@ -48,8 +50,9 @@ async def create_market_research(request: CreateMarketResearchRequest, db: Sessi
     """Создание нового исследования рынка"""
     try:
         service = create_service_with_session(db)
-        market_research = service.create_market_research(request.initial_query)
-        return market_research
+        created_mr = service.create_market_research(request.initial_query)
+        created_mr = service.process_user_message(created_mr.id, request.initial_query)
+        return created_mr
     except Exception as e:
         logger.error(f"Ошибка при создании исследования: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,41 +157,4 @@ async def submit_results(request: SubmitResultsRequest, db: Session = Depends(ge
         # В случае ошибки, возвращаем задачу в состояние "pending"
         service.task_repo.update_status(request.task_id, "pending")
 
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-class UnifiedChatRequest(ChatUpdateRequest):
-    """Запрос для унифицированного чат-эндпоинта"""
-    mr_id: Optional[int] = None  # ID существующего исследования (опционально)
-
-
-@router.post("/chat", response_model=MarketResearch)
-async def unified_chat_endpoint(request: UnifiedChatRequest, db: Session = Depends(get_db)):
-    """
-    Единый эндпоинт для чата.
-    Если mr_id не передан или исследования не существует, создает новое и обрабатывает сообщение.
-    Если mr_id передан и исследование существует, обрабатывает сообщение в существующем исследовании.
-    Это фасад, который скрывает логику создания сессии от фронтенда.
-    """
-    try:
-        service = create_service_with_session(db)
-
-        # Если передан mr_id и такое исследование существует, обрабатываем сообщение в нем
-        if request.mr_id:
-            market_research = service.mr_repo.get_by_id(request.mr_id)
-            if market_research:
-                # Обрабатываем сообщение в существующем исследовании
-                market_research = service.process_user_message(request.mr_id, request.message)
-                return market_research
-
-        # Если mr_id не передан или исследования не существует, создаем новое
-        # и сразу обрабатываем сообщение (как если бы это было первое сообщение в чате)
-        market_research = service.create_market_research(request.message)
-
-        # После создания исследования, обрабатываем сообщение, чтобы вызвать LLM
-        market_research = service.process_user_message(market_research.id, request.message)
-
-        return market_research
-    except Exception as e:
-        logger.error(f"Ошибка при обработке чата: {e}")
         raise HTTPException(status_code=500, detail=str(e))

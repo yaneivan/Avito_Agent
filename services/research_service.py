@@ -17,7 +17,6 @@ from utils.logger import logger
 from .chat_service import ChatService
 from .quick_search_service import QuickSearchService
 from .deep_search_service import DeepSearchService
-from .visual_analysis_service import VisualAnalysisService
 
 
 class MarketResearchService:
@@ -28,7 +27,6 @@ class MarketResearchService:
         self.schema_repo = SchemaRepository(self.db)
         self.raw_lot_repo = RawLotRepository(self.db)
         self.analyzed_lot_repo = AnalyzedLotRepository(self.db)
-        self.visual_service = VisualAnalysisService()
 
         # Инициализируем специализированные сервисы
         self.chat_service = ChatService(self.mr_repo)
@@ -43,18 +41,15 @@ class MarketResearchService:
             self.schema_repo,
             self.raw_lot_repo,
             self.analyzed_lot_repo,
-            self.visual_service
         )
 
     def create_market_research(self, initial_query: str) -> MarketResearch:
         """Создание нового исследования рынка"""
         logger.info(f"Создаем новое исследование рынка с запросом: {initial_query}")
 
-        from uuid import uuid4
-
         market_research = MarketResearch(
             state=State.CHAT,
-            chat_history=[ChatMessage(id=str(uuid4()), role="user", content=initial_query)]
+            chat_history=[]
         )
 
         created_mr = self.mr_repo.create(market_research)
@@ -125,18 +120,37 @@ class MarketResearchService:
                             # Сообщение пользователю уже добавлено в chat_service, не нужно дублировать
                             # Только обновляем состояние
 
-                        # 3.2. Если это планирование глубокого исследования
-                        elif tool_name == "initiate_deep_research_planning":
-                            # Извлечь тему исследования из параметров
-                            initial_topic = params.get('initial_topic', message)
-
-                            # Обновить состояние для планирования глубокого исследования
+                        # 3.2. Планирование (только меняем стейт)
+                        elif tool_name == "plan_deep_research":
                             new_state = State.PLANNING_DEEP_RESEARCH
                             market_research.state = new_state
                             self.mr_repo.update_state(mr_id, new_state)
 
-                            # Сообщение пользователю уже добавлено в chat_service, не нужно дублировать
-                            # Только обновляем состояние
+                        # 3.3. Запуск (создаем схему и задачу)
+                        elif tool_name == "execute_deep_research":
+                            # 1. Сохраняем схему
+                            new_schema = self.schema_repo.create(
+                                name=f"Schema: {params.get('topic')}",
+                                description=params.get('context_summary'),
+                                json_schema=params.get('schema') # Это JSON из tool_call
+                            )
+
+                            # 2. Создаем задачу поиска
+                            search_task = SearchTask(
+                                market_research_id=mr_id,
+                                mode="deep",
+                                query=params.get('topic'),
+                                limit=int(params.get('limit', 50)),
+                                needs_visual=bool(params.get('needs_visual', False)),
+                                schema_id=new_schema.id,
+                                status="pending"
+                            )
+                            self.task_repo.create(search_task)
+
+                            # 3. Переходим в режим поиска
+                            new_state = State.DEEP_RESEARCH
+                            market_research.state = new_state
+                            self.mr_repo.update_state(mr_id, new_state)
                         
                         # Сохранить обновленное исследование
                         self.mr_repo.update(market_research)
