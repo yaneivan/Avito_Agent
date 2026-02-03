@@ -1,111 +1,125 @@
+import re
 from typing import List, Dict, Any
 from utils.logger import logger
 from utils.llm_client import get_completion
 
-
-def tournament_ranking(lot_groups: List[List[Dict]], criteria: str) -> List[Dict]:
+def tournament_ranking(lot_groups: List[List[Dict[str, Any]]], criteria: str) -> List[Dict[str, Any]]:
     """
-    Турнирный реранкинг товаров по критериям
-
-    :param lot_groups: Группы лотов для сравнения (по 5 штук)
-    :param criteria: Критерии для сравнения
-    :return: Отсортированные лоты по рейтингу
+    Турнирный реранкинг товаров по системе Борда с нормализацией.
+    
+    :param lot_groups: Группы лотов (по 5 шт) с перекрытием.
+    :param criteria: Критерии для сравнения.
+    :return: Отсортированный список исходных объектов лотов.
     """
-    logger.info(f"Начинаем турнирный реранкинг для {len(lot_groups)} групп")
+    logger.info(f"Начало турнира: {len(lot_groups)} групп")
 
-    # Словарь для хранения итоговых баллов
-    total_scores = {}
+    # Собираем статистику: сумма баллов и количество участий
+    # lot_stats = { id: {"sum": total_points, "count": appearances, "data": original_dict} }
+    lot_stats: Dict[str, Dict[str, Any]] = {}
 
-    # Обрабатываем каждую группу
     for group_idx, group in enumerate(lot_groups):
-        logger.info(f"Обрабатываем группу {group_idx + 1}/{len(lot_groups)}, размер: {len(group)}")
-
-        # Ранжируем товары в группе с использованием LLM
+        logger.info(f"Обработка группы {group_idx + 1}/{len(lot_groups)}")
+        
+        # 1. Ранжируем группу через LLM
         ranked_group = rank_group(group, criteria)
 
-        # Применяем систему голосования по Борда
+        # 2. Начисляем баллы Борда (1-е место = N баллов, последнее = 1 балл)
+        n = len(ranked_group)
         for position, lot in enumerate(ranked_group):
-            lot_id = lot.get('id', f"{group_idx}_{position}")  # Уникальный ID для товара
-            score = len(ranked_group) - position  # Чем выше место, тем больше баллов
+            # Важно: используем реальный ID из базы
+            lot_id = str(lot.get('id'))
+            if not lot_id or lot_id == "None":
+                logger.error(f"Критическая ошибка: у лота отсутствует ID в группе {group_idx}")
+                continue
 
-            if lot_id in total_scores:
-                total_scores[lot_id] += score
-            else:
-                total_scores[lot_id] = score
+            points = n - position
 
-    # Сортируем товары по итоговым баллам
-    sorted_lots = sorted(total_scores.items(), key=lambda x: x[1], reverse=True)
+            if lot_id not in lot_stats:
+                lot_stats[lot_id] = {"sum": 0, "count": 0, "data": lot}
+            
+            lot_stats[lot_id]["sum"] += points
+            lot_stats[lot_id]["count"] += 1
 
-    logger.info(f"Турнирный реранкинг завершен, всего уникальных товаров: {len(sorted_lots)}")
+    # 3. Нормализация (вычисляем средний балл)
+    final_list = []
+    for lot_id, stats in lot_stats.items():
+        avg_score = stats["sum"] / stats["count"]
+        # Сохраняем средний балл в объект для отладки/отображения
+        lot_data = stats["data"]
+        lot_data["tournament_score"] = round(avg_score, 2)
+        final_list.append(lot_data)
 
-    # Возвращаем отсортированные лоты с их итоговыми баллами
-    result = []
-    for lot_id, score in sorted_lots:
-        # В реальной реализации здесь нужно будет получить полные данные о лоте
-        result.append({
-            'id': lot_id,
-            'score': score,
-            'original_data': {}  # Здесь будут полные данные о лоте
-        })
-
-    return result
+    # 4. Финальная сортировка по среднему баллу
+    sorted_result = sorted(final_list, key=lambda x: x["tournament_score"], reverse=True)
+    
+    logger.info(f"Турнир завершен. Отранжировано {len(sorted_result)} уникальных лотов")
+    return sorted_result
 
 
-def rank_group(group: List[Dict], criteria: str) -> List[Dict]:
+def rank_group(group: List[Dict[str, Any]], criteria: str) -> List[Dict[str, Any]]:
     """
-    Ранжирование товаров внутри группы с использованием LLM
-
-    :param group: Группа товаров для ранжирования
-    :param criteria: Критерии для сравнения
-    :return: Ранжированная группа товаров (от лучшего к худшему)
+    Ранжирование конкретной группы лотов. 
+    В случае ошибки парсинга возвращает исходную группу (чтобы не ломать весь поиск).
     """
-    logger.info(f"Ранжируем группу из {len(group)} товаров по критериям: {criteria}")
+    # Подготавливаем расширенный контекст для LLM (включая визуальные заметки)
+    items_description = []
+    for i, item in enumerate(group):
+        desc = (
+            f"ID: {i+1}\n"
+            f"Title: {item.get('title')}\n"
+            f"Price: {item.get('price')}\n"
+            f"Characteristics: {item.get('structured_data')}\n"
+            f"Visual analysis: {item.get('image_description_and_notes')}\n"
+            f"Relevance: {item.get('relevance')}\n"
+        )
+        items_description.append(desc)
 
-    # Формируем промпт для LLM
-    products_info = "\n".join([
-        f"{i+1}. {item.get('title', 'Без названия')} - {item.get('price', 'Цена не указана')}" +
-        (f"\n   Характеристики: {item.get('structured_data', {})}" if item.get('structured_data') else "")
-        for i, item in enumerate(group)
-    ])
+    full_items_text = "\n---\n".join(items_description)
 
     prompt = f"""
-    Товары для сравнения:
-    {products_info}
+Compare these items based on criteria: {criteria}
 
-    Критерии оценки: {criteria}
+Items to rank:
+{full_items_text}
 
-    Оцени товары по заданным критериям и расположи их по порядку от лучшего к худшему.
-    Возвращай только номера товаров в порядке убывания качества (лучший первый),
-    разделяя их запятыми. Например: 2, 1, 4, 3, 5
-    """
+Rank them from BEST to WORST. Return ONLY the IDs separated by commas.
+Example: 3, 1, 5, 2, 4
+"""
 
     messages = [
-        {"role": "system", "content": "Ты помощник в сравнении товаров. Пользователь предоставит тебе список товаров и критерии оценки. Верни только номера товаров в порядке убывания качества (лучший первый), разделяя их запятыми."},
+        {"role": "system", "content": "You are a professional market analyst. Rank items strictly by criteria. Return ONLY a comma-separated list of numeric IDs."},
         {"role": "user", "content": prompt}
     ]
 
     try:
         response = get_completion(messages)
-        ranking_str = response.content.strip()
+        content = response.content.strip()
+        
+        # Надежный парсинг: вытаскиваем все числа из ответа
+        found_ids = [int(x) for x in re.findall(r'\d+', content)]
+        
+        # Валидация: убираем дубли и проверяем границы индексов
+        seen = set()
+        valid_indices = []
+        for idx in found_ids:
+            # Превращаем ID (1-based) в индекс (0-based)
+            actual_idx = idx - 1
+            if 0 <= actual_idx < len(group) and actual_idx not in seen:
+                valid_indices.append(actual_idx)
+                seen.add(actual_idx)
 
-        # Парсим ответ, содержащий номера товаров
-        ranked_indices = [int(x.strip()) - 1 for x in ranking_str.split(',') if x.strip().isdigit()]
+        # Формируем список объектов в новом порядке
+        ranked_items = [group[i] for i in valid_indices]
 
-        # Проверяем, что все индексы в допустимом диапазоне
-        ranked_items = []
-        for idx in ranked_indices:
-            if 0 <= idx < len(group):
-                ranked_items.append(group[idx])
+        # Добавляем потерянные лоты (если LLM кого-то забыла) в конец
+        if len(ranked_items) < len(group):
+            missing_items = [item for i, item in enumerate(group) if i not in seen]
+            ranked_items.extend(missing_items)
+            logger.warning(f"LLM пропустила {len(missing_items)} лотов при ранжировании, они добавлены в конец")
 
-        # Добавляем оставшиеся товары, если какие-то были пропущены
-        ranked_item_ids = {id(item) for item in ranked_items}
-        for item in group:
-            if id(item) not in [id(i) for i in ranked_items]:
-                ranked_items.append(item)
-
-        logger.info(f"Группа из {len(group)} товаров успешно отранжирована")
         return ranked_items
+
     except Exception as e:
-        logger.error(f"Ошибка при ранжировании группы товаров: {e}")
-        # В случае ошибки возвращаем исходный порядок
+        logger.error(f"Ошибка при вызове LLM в rank_group: {e}", exc_info=True)
+        # В случае сбоя возвращаем как было, чтобы не прерывать процесс
         return group

@@ -168,93 +168,99 @@ class DeepSearchService:
         return analyzed_lot
 
     def _apply_tournament_ranking(self, analyzed_lots: List[AnalyzedLot], schema: Schema) -> List[AnalyzedLot]:
-        """Применение турнирного реранкинга к результатам"""
-        logger.info(f"Применяем турнирный реранкинг к {len(analyzed_lots)} лотам")
+            """Применение турнирного реранкинга к результатам"""
+            logger.info(f"Применяем турнирный реранкинг к {len(analyzed_lots)} лотам")
 
-        # Разбиваем лоты на группы по 5 штук с перекрытием
-        groups = []
-        group_size = 5
-        overlap = 1  # Количество перекрывающихся элементов между группами
+            # 1. Разбиваем лоты на группы по 5 штук с перекрытием в 1 элемент
+            groups = []
+            group_size = 5
+            overlap = 1
 
-        for i in range(0, len(analyzed_lots), group_size - overlap):
-            group = analyzed_lots[i:i + group_size]
-            if len(group) >= 2:  # Минимальный размер группы для сравнения
-                groups.append(group)
+            for i in range(0, len(analyzed_lots), group_size - overlap):
+                group = analyzed_lots[i:i + group_size]
+                if len(group) >= 2:
+                    groups.append(group)
 
-        # Подготовим данные для турнирного реранкинга
-        lot_groups_data = []
-        for group in groups:
-            group_data = []
-            for lot in group:
-                group_data.append({
-                    'id': lot.id,
-                    'title': lot.structured_data.get('title', ''),
-                    'price': lot.structured_data.get('price', ''),
-                    'structured_data': lot.structured_data,
-                    'visual_notes': lot.visual_notes,
-                    'image_description': lot.image_description
-                })
-            lot_groups_data.append(group_data)
+            # 2. Подготовим данные для турнирного реранкинга (словари для LLM)
+            lot_groups_data = []
+            for group in groups:
+                group_data = []
+                for lot in group:
+                    group_data.append({
+                        'id': lot.id,  # Обязательно передаем реальный ID
+                        'title': lot.structured_data.get('title', 'N/A'),
+                        'price': lot.structured_data.get('price', 'N/A'),
+                        'structured_data': lot.structured_data,
+                        'relevance': lot.relevance_note,  # Переименовано для TournamentService
+                        'image_description_and_notes': lot.image_description_and_notes
+                    })
+                lot_groups_data.append(group_data)
 
-        # Определяем критерии для реранкинга на основе схемы
-        criteria = ", ".join(schema.json_schema.get("properties", {}).keys())
+            # 3. Определяем критерии на основе ключей схемы
+            criteria = ", ".join(schema.json_schema.get("properties", {}).keys())
 
-        # Выполняем турнирный реранкинг
-        ranked_result = tournament_ranking(lot_groups_data, criteria)
+            # 4. Выполняем турнирный реранкинг
+            # Теперь ranked_result — это список словарей в правильном порядке
+            ranked_result_data = tournament_ranking(lot_groups_data, criteria)
 
-        # Сопоставляем результаты с оригинальными лотами
-        ranked_lots = []
-        for ranked_item in ranked_result:
-            lot_id = ranked_item['id']
-            # Найдем соответствующий лот в исходном списке
+            # 5. Мапим ID обратно в объекты AnalyzedLot (эффективно через словарь)
+            id_to_lot_map = {lot.id: lot for lot in analyzed_lots}
+            ranked_lots = []
+            
+            for item in ranked_result_data:
+                lot_id = item['id']
+                if lot_id in id_to_lot_map:
+                    ranked_lots.append(id_to_lot_map[lot_id])
+
+            # 6. Добавляем лоты, которые могли не попасть в турнир (safety first)
+            ranked_lot_ids = {lot.id for lot in ranked_lots}
             for lot in analyzed_lots:
-                if lot.id == lot_id:
+                if lot.id not in ranked_lot_ids:
                     ranked_lots.append(lot)
-                    break
 
-        # Если какие-то лоты не вошли в результаты, добавим их в конец
-        ranked_lot_ids = {lot.id for lot in ranked_lots}
-        for lot in analyzed_lots:
-            if lot.id not in ranked_lot_ids:
-                ranked_lots.append(lot)
-
-        logger.info(f"Турнирный реранкинг завершен, получено {len(ranked_lots)} отранжированных лотов")
-        return ranked_lots
+            logger.info(f"Турнирный реранкинг завершен. Топ-1: {ranked_lots[0].structured_data.get('title') if ranked_lots else 'N/A'}")
+            return ranked_lots
+    
 
     def _format_deep_search_results(self, analyzed_lots: List[AnalyzedLot], schema: Schema) -> str:
-        """Форматирование результатов глубокого поиска для отправки пользователю"""
-        logger.info(f"Форматируем {len(analyzed_lots)} результатов глубокого поиска")
+            """Форматирование результатов глубокого поиска для отправки пользователю"""
+            logger.info(f"Форматируем {len(analyzed_lots)} результатов глубокого поиска")
 
-        if not analyzed_lots:
-            return "К сожалению, не удалось найти подходящие товары по вашему запросу."
+            if not analyzed_lots:
+                return "К сожалению, не удалось найти подходящие товары по вашему запросу."
 
-        # Формируем результаты с учетом структурированных данных и схемы
-        formatted_results = "Результаты глубокого анализа:\n\n"
+            formatted_results = "### 📊 Результаты глубокого анализа\n\n"
 
-        # Ограничиваем количество отображаемых результатов
-        max_results = 5
-        lots_to_show = analyzed_lots[:max_results]
+            # Ограничиваем количество отображаемых карточек (например, топ-5)
+            max_results = 5
+            lots_to_show = analyzed_lots[:max_results]
 
-        for i, lot in enumerate(lots_to_show):
-            title = lot.structured_data.get('title', 'Без названия')
-            price = lot.structured_data.get('price', 'Цена не указана')
+            for i, lot in enumerate(lots_to_show):
+                title = lot.structured_data.get('title', 'Без названия')
+                price = lot.structured_data.get('price', 'Цена не указана')
+                
+                # Заголовок лота с его турнирным баллом (если он был рассчитан)
+                score_str = f" (Рейтинг: {lot.tournament_score})" if hasattr(lot, 'tournament_score') else ""
+                formatted_results += f"{i+1}. **{title}** — {price}{score_str}\n"
 
-            formatted_results += f"{i+1}. {title} - {price}\n"
+                # 1. Выводим поля из JSON схемы (кроме заголовка и цены)
+                schema_properties = schema.json_schema.get("properties", {})
+                for prop_name in schema_properties.keys():
+                    if prop_name in lot.structured_data and prop_name.lower() not in ['title', 'price']:
+                        val = lot.structured_data[prop_name]
+                        formatted_results += f"   - *{prop_name}*: {val}\n"
 
-            # Добавляем параметры, указанные в схеме
-            schema_properties = schema.json_schema.get("properties", {})
-            for prop_name in schema_properties.keys():
-                if prop_name in lot.structured_data and prop_name not in ['title', 'price']:
-                    formatted_results += f"   {prop_name}: {lot.structured_data[prop_name]}\n"
+                # 2. Выводим релевантность (почему он в топе)
+                if lot.relevance_note and lot.relevance_note != "N/A":
+                    formatted_results += f"   - **Почему подходит**: {lot.relevance_note}\n"
 
-            # Добавляем визуальные заметки, если есть
-            if lot.visual_notes:
-                formatted_results += f"   Визуальные особенности: {lot.visual_notes}\n"
+                # 3. Выводим визуальные заметки
+                if lot.image_description_and_notes and lot.image_description_and_notes != "N/A":
+                    formatted_results += f"   - **Визуально**: {lot.image_description_and_notes}\n"
 
-            formatted_results += "\n"
+                formatted_results += "\n"
 
-        # Если есть больше результатов, чем показываем, уведомляем пользователя
-        if len(analyzed_lots) > max_results:
-            formatted_results += f"... и еще {len(analyzed_lots) - max_results} товаров.\n"
+            if len(analyzed_lots) > max_results:
+                formatted_results += f"*И еще {len(analyzed_lots) - max_results} товаров были проанализированы и отсортированы ниже по списку.*"
 
-        return formatted_results
+            return formatted_results
