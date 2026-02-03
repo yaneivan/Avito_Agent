@@ -127,7 +127,7 @@ class ChatService:
 Если ты вызываешь инструмент, оберни JSON вызова в тег <tool_call>.
 Ты можешь совмещать обычный текст ответа и вызов инструмента.
 Пример:
-"Хорошо, я поищу для вас варианты. <tool_call>{ "name": "start_quick_search", ... }</tool_call>"
+"Хорошо, я поищу варианты. <tool_call>{"name": "start_quick_search", "query": "название", "needs_visual": false}</tool_call>"
 """
 
         llm_messages.insert(0, {"role": "system", "content": system_prompt})

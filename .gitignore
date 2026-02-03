@@ -8,3 +8,5 @@ services/__pycache__/query_processing_service.cpython-310.pyc
 /utils/__pycache__
 data/avito_agent.db
 /frontend_next
+/repositories/__pycache__
+/repositories/__pycache__

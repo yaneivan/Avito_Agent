@@ -225,15 +225,19 @@ class AnalyzedLotRepository:
         self.db = db
 
     def create(self, analyzed_lot: AnalyzedLot) -> AnalyzedLot:
-            db_analyzed_lot = DBAnalyzedLot(
-                raw_lot_id=analyzed_lot.raw_lot_id,
-                schema_id=analyzed_lot.schema_id,
-                structured_data=json.dumps(analyzed_lot.structured_data),
-                relevance_note=analyzed_lot.relevance_note,
-                image_description_and_notes=analyzed_lot.image_description_and_notes,
-                tournament_score=getattr(analyzed_lot, 'tournament_score', 0.0)
-            )
-            self.db.add(db_analyzed_lot)
+        db_analyzed_lot = DBAnalyzedLot(
+            raw_lot_id=analyzed_lot.raw_lot_id,
+            schema_id=analyzed_lot.schema_id,
+            structured_data=json.dumps(analyzed_lot.structured_data),
+            relevance_note=analyzed_lot.relevance_note,
+            image_description_and_notes=analyzed_lot.image_description_and_notes,
+            tournament_score=getattr(analyzed_lot, 'tournament_score', 0.0)
+        )
+        self.db.add(db_analyzed_lot)
+        self.db.commit()
+        self.db.refresh(db_analyzed_lot)
+        analyzed_lot.id = db_analyzed_lot.id
+        return analyzed_lot
 
     def get_by_id(self, lot_id: int) -> Optional[AnalyzedLot]:
         db_lot = self.db.query(DBAnalyzedLot).filter(DBAnalyzedLot.id == lot_id).first()
@@ -245,8 +249,9 @@ class AnalyzedLotRepository:
             raw_lot_id=db_lot.raw_lot_id,
             schema_id=db_lot.schema_id,
             structured_data=json.loads(db_lot.structured_data),
-            visual_notes=db_lot.visual_notes,
-            image_description=db_lot.image_description,
+            relevance_note=db_lot.relevance_note,
+            image_description_and_notes=db_lot.image_description_and_notes,
+            tournament_score=db_lot.tournament_score or 0.0,
             created_at=db_lot.created_at
         )
 
