@@ -98,11 +98,11 @@ class DeepSearchService:
             ChatMessage(id=str(uuid.uuid4()), role="assistant", content=result_message)
         )
 
-        # Возвращаемся к состоянию CHAT
+        # Возвращаемся к состоянию CHAT и сохраняем обновленную историю чата
         market_research.state = State.CHAT
-        self.mr_repo.update_state(task.market_research_id, State.CHAT)
+        self.mr_repo.update(market_research)
 
-        logger.info(f"Результаты глубокого поиска обработаны для исследования {task.market_research_id}")
+        logger.info(f"Результаты глубокого поиска обработаны и сохранены для исследования {task.market_research_id}")
         return market_research
 
     def _analyze_lot_with_schema(self, raw_lot: RawLot, schema: Schema) -> AnalyzedLot:
@@ -112,20 +112,20 @@ class DeepSearchService:
         from utils.llm_client import get_completion
 
 
-        full_schema = copy.deepcopy(schema.json_schema)
-        full_schema.update({"relevance_note":"Why this lot is good/bad for user.", 
-                            "image_description_and_notes": "Relevant information from the image - colors, details, condition"})
+        # Формируем читаемые инструкции из плоской схемы
+        fields_desc = "\n".join([f"- {k}: {v['description']} (тип: {v['type']})" for k, v in schema.json_schema.items()])
 
-
-        # Формируем сообщение для LLM
         messages = [
             {
                 "role": "system",
-                "content": f"""Извлеки информацию из описания товара в соответствии со следующей JSON-схемой: {json.dumps(full_schema)}
-                Возвращай только JSON в соответствии со схемой."""
-            },
-        ]
+                "content": f"""Извлеки характеристики товара в формате JSON.
+        Поля для извлечения:
+        {fields_desc}
+        - relevance_note: почему этот лот подходит пользователю.
+        - image_description_and_notes: что изображено, видно на фото (объект, цвета, детали, состояние).
 
+        Возвращай СТРОГО чистый JSON."""
+                    },]
         user_content = [{"type": "text", "text": f"Title: {raw_lot.title}\nDesc: {raw_lot.description}\nPrice: {raw_lot.price}"}]
         
         
@@ -186,18 +186,19 @@ class DeepSearchService:
             for group in groups:
                 group_data = []
                 for lot in group:
+                    raw_lot = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
                     group_data.append({
                         'id': lot.id,  # Обязательно передаем реальный ID
-                        'title': lot.structured_data.get('title', 'N/A'),
-                        'price': lot.structured_data.get('price', 'N/A'),
+                        'title': raw_lot.title if raw_lot else 'N/A',
+                        'price': raw_lot.price if raw_lot else 'N/A',
                         'structured_data': lot.structured_data,
                         'relevance': lot.relevance_note,  # Переименовано для TournamentService
                         'image_description_and_notes': lot.image_description_and_notes
                     })
                 lot_groups_data.append(group_data)
 
-            # 3. Определяем критерии на основе ключей схемы
-            criteria = ", ".join(schema.json_schema.get("properties", {}).keys())
+            # 3. Определяем критерии на основе ключей плоской схемы
+            criteria = ", ".join(schema.json_schema.keys())
 
             # 4. Выполняем турнирный реранкинг
             # Теперь ranked_result — это список словарей в правильном порядке
@@ -210,7 +211,9 @@ class DeepSearchService:
             for item in ranked_result_data:
                 lot_id = item['id']
                 if lot_id in id_to_lot_map:
-                    ranked_lots.append(id_to_lot_map[lot_id])
+                    lot = id_to_lot_map[lot_id]
+                    lot.tournament_score = item.get('tournament_score', 0)
+                    ranked_lots.append(lot)
 
             # 6. Добавляем лоты, которые могли не попасть в турнир (safety first)
             ranked_lot_ids = {lot.id for lot in ranked_lots}
@@ -218,16 +221,17 @@ class DeepSearchService:
                 if lot.id not in ranked_lot_ids:
                     ranked_lots.append(lot)
 
-            logger.info(f"Турнирный реранкинг завершен. Топ-1: {ranked_lots[0].structured_data.get('title') if ranked_lots else 'N/A'}")
+            if ranked_lots:
+                top_raw = self.raw_lot_repo.get_by_id(ranked_lots[0].raw_lot_id)
+                top_title = top_raw.title if top_raw else "N/A"
+                logger.info(f"Турнирный реранкинг завершен. Топ-1: {top_title} (ID: {ranked_lots[0].id})")
+            
             return ranked_lots
     
 
     def _format_deep_search_results(self, analyzed_lots: List[AnalyzedLot], schema: Schema) -> str:
             """Форматирование результатов глубокого поиска для отправки пользователю"""
             logger.info(f"Форматируем {len(analyzed_lots)} результатов глубокого поиска")
-
-            if not analyzed_lots:
-                return "К сожалению, не удалось найти подходящие товары по вашему запросу."
 
             formatted_results = "### 📊 Результаты глубокого анализа\n\n"
 
@@ -236,16 +240,15 @@ class DeepSearchService:
             lots_to_show = analyzed_lots[:max_results]
 
             for i, lot in enumerate(lots_to_show):
-                title = lot.structured_data.get('title', 'Без названия')
-                price = lot.structured_data.get('price', 'Цена не указана')
+                raw_lot = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
+                title = raw_lot.title if raw_lot else 'Без названия'
+                price = raw_lot.price if raw_lot else 'Цена не указана'
                 
-                # Заголовок лота с его турнирным баллом (если он был рассчитан)
-                score_str = f" (Рейтинг: {lot.tournament_score})" if hasattr(lot, 'tournament_score') else ""
+                score_str = f" (Рейтинг: {lot.tournament_score})" if (hasattr(lot, 'tournament_score') and lot.tournament_score) else ""
                 formatted_results += f"{i+1}. **{title}** — {price}{score_str}\n"
 
-                # 1. Выводим поля из JSON схемы (кроме заголовка и цены)
-                schema_properties = schema.json_schema.get("properties", {})
-                for prop_name in schema_properties.keys():
+                # 1. Выводим поля из плоской схемы
+                for prop_name in schema.json_schema.keys():
                     if prop_name in lot.structured_data and prop_name.lower() not in ['title', 'price']:
                         val = lot.structured_data[prop_name]
                         formatted_results += f"   - *{prop_name}*: {val}\n"

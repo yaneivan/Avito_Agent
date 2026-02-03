@@ -154,7 +154,8 @@ async def submit_results(request: SubmitResultsRequest, db: Session = Depends(ge
     except Exception as e:
         extension_logger.error(f"Ошибка при обработке результатов задачи {request.task_id}: {e}")
 
-        # В случае ошибки, возвращаем задачу в состояние "pending"
-        service.task_repo.update_status(request.task_id, "pending")
+        # Ставим failed, чтобы разорвать цикл переповторов
+        service.task_repo.update_status(request.task_id, "failed")
 
+        logger.exception(f"Full traceback for task {request.task_id}:")
         raise HTTPException(status_code=500, detail=str(e))

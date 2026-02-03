@@ -40,11 +40,11 @@ class AnalyzedLot(BaseModel):
     id: Optional[int] = None
     raw_lot_id: int
     schema_id: int
-    structured_data: dict  # Data according to schema
-    visual_notes: str  # Notes from image analysis
-    image_description: str  # Brief description of image
+    structured_data: dict
+    relevance_note: str
+    image_description_and_notes: str
+    tournament_score: float = 0.0
     created_at: datetime = datetime.now()
-
 
 class SearchTask(BaseModel):
     id: Optional[int] = None

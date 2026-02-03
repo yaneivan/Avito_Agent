@@ -129,18 +129,20 @@ class MarketResearchService:
                         # 3.3. Запуск (создаем схему и задачу)
                         elif tool_name == "execute_deep_research":
                             # 1. Сохраняем схему
-                            new_schema = self.schema_repo.create(
+                            from models.research_models import Schema as SchemaModel
+                            schema_obj = SchemaModel(
                                 name=f"Schema: {params.get('topic')}",
-                                description=params.get('context_summary'),
-                                json_schema=params.get('schema') # Это JSON из tool_call
+                                description=params.get('context_summary', ''),
+                                json_schema=params.get('schema', {})
                             )
+                            new_schema = self.schema_repo.create(schema_obj)
 
                             # 2. Создаем задачу поиска
                             search_task = SearchTask(
                                 market_research_id=mr_id,
                                 mode="deep",
                                 query=params.get('topic'),
-                                limit=int(params.get('limit', 50)),
+                                limit=int(params.get('limit', 10)),
                                 needs_visual=bool(params.get('needs_visual', False)),
                                 schema_id=new_schema.id,
                                 status="pending"

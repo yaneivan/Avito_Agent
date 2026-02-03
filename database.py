@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, ForeignKey, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -53,9 +53,10 @@ class DBAnalyzedLot(Base):
     id = Column(Integer, primary_key=True, index=True)
     raw_lot_id = Column(Integer, ForeignKey("raw_lots.id"))
     schema_id = Column(Integer, ForeignKey("schemas.id"))
-    structured_data = Column(Text)  # JSON data as text
-    visual_notes = Column(Text)
-    image_description = Column(Text)
+    structured_data = Column(Text)
+    relevance_note = Column(Text)
+    image_description_and_notes = Column(Text)
+    tournament_score = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
