@@ -30,8 +30,8 @@ def main():
         "main:app",
         host="0.0.0.0",
         port=8001,
-        reload=True
-        # reload=False  # Отключаем hot-reload для лучшей обработки сигналов
+        # reload=True
+        reload=False  # Отключаем hot-reload для лучшей обработки сигналов
         # Если нужен reload для разработки, можно вернуть reload=True
     )
 

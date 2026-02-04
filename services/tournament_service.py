@@ -86,6 +86,8 @@ RANKING: 1, 3, 2
         response = get_completion(messages)
         content = response.content.strip()
         
+        logger.info(f"Промпт для группы:\n{prompt}")
+        logger.info(f"----------------------------")
         logger.info(f"Полный ответ LLM для группы:\n{content}")
 
         if "RANKING:" not in content:

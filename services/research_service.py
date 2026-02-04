@@ -107,6 +107,7 @@ class MarketResearchService:
                             search_task = SearchTask(
                                 market_research_id=mr_id,
                                 mode="quick",
+                                topic=f"Quick Search: {query}",
                                 query=query,
                                 needs_visual=needs_visual
                             )
@@ -141,7 +142,8 @@ class MarketResearchService:
                             search_task = SearchTask(
                                 market_research_id=mr_id,
                                 mode="deep",
-                                query=params.get('topic'),
+                                topic=params.get('topic', 'Deep Research'),
+                                query=params.get('query', message), 
                                 limit=int(params.get('limit', 10)),
                                 needs_visual=bool(params.get('needs_visual', False)),
                                 schema_id=new_schema.id,

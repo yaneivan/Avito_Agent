@@ -76,8 +76,7 @@ class DeepSearchService:
                 else:
                     ranked_lots = analyzed_lots
 
-                # Формируем сообщение для пользователя с результатами
-                result_message = self._format_deep_search_results(ranked_lots, schema)
+                result_message = self._generate_analytical_summary(ranked_lots[:10], schema, task.topic)
             else:
                 # Если схема не найдена, просто форматируем сырые результаты
                 from .quick_search_service import QuickSearchService
@@ -198,7 +197,8 @@ class DeepSearchService:
                 lot_groups_data.append(group_data)
 
             # 3. Определяем критерии на основе ключей плоской схемы
-            criteria = ", ".join(schema.json_schema.keys())
+            criteria = "Цена (сравнение стоимости), " + ", ".join(schema.json_schema.keys())
+            criteria += ". Также учитывай соотношение цены и характеристик (выгодность)."
 
             # 4. Выполняем турнирный реранкинг
             # Теперь ranked_result — это список словарей в правильном порядке
@@ -267,3 +267,50 @@ class DeepSearchService:
                 formatted_results += f"*И еще {len(analyzed_lots) - max_results} товаров были проанализированы и отсортированы ниже по списку.*"
 
             return formatted_results
+    
+
+    def _generate_analytical_summary(self, top_lots: List[AnalyzedLot], schema: Schema, topic: str) -> str:
+        """Генерация экспертного резюме на основе топ-результатов турнира"""
+        logger.info(f"Генерируем аналитическое резюме для темы: {topic}")
+        
+        if not top_lots:
+            return ""
+
+        # Подготавливаем данные о лидерах для LLM
+        lots_context = []
+        for i, lot in enumerate(top_lots[:5]): # Берем топ-5 для глубокого анализа
+            raw = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
+            lots_context.append(
+                f"Лот #{i+1}: {raw.title}\n"
+                f"Цена: {raw.price}\n"
+                f"Параметры: {lot.structured_data}\n"
+                f"Заметки: {lot.relevance_note}\n"
+                f"Визуал: {lot.image_description_and_notes}"
+            )
+
+        context_str = "\n\n".join(lots_context)
+        
+        from utils.llm_client import get_completion
+        
+        system_prompt = f"""Ты — ведущий эксперт по закупкам и аналитик рынка. 
+    Твоя задача: изучить результаты поиска по теме "{topic}" и написать краткое, живое аналитическое резюме.
+    У тебя есть список товаров, которые уже отранжированы по качеству/цене в ходе турнира.
+
+    ПРАВИЛА:
+    1. Будь краток и профессионален.
+    2. Выдели лучшую сделку (Best Buy) и объясни почему.
+    3. Дай практический совет: на что нажать, что проверить (например, "цена подозрительно низкая, просите доп. фото" или "это редкая ревизия, надо брать").
+    4. Будь критичен. Если все варианты плохие — так и скажи.
+    5. Объем: 2-3 компактных абзаца."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Вот топ-5 товаров из моего исследования:\n\n{context_str}\n\nСделай вывод эксперта."}
+        ]
+
+        try:
+            response = get_completion(messages)
+            return response.content.strip()
+        except Exception as e:
+            logger.error(f"Ошибка при генерации резюме: {e}")
+            return "Не удалось сгенерировать аналитический отчет, но результаты поиска ниже."

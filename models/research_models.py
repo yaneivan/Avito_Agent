@@ -51,6 +51,7 @@ class SearchTask(BaseModel):
     market_research_id: int
     mode: str  # "quick" or "deep"
     query: str
+    topic: str 
     schema_id: Optional[int] = None  # For deep research
     needs_visual: bool = False
     limit: int = 10  # Количество товаров для поиска

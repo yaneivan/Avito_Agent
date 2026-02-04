@@ -70,6 +70,7 @@ class MarketResearchRepository:
                 id=task.id,
                 market_research_id=task.market_research_id,
                 mode=task.mode,
+                topic=task.topic, 
                 query=task.query,
                 schema_id=task.schema_id,
                 needs_visual=task.needs_visual,
@@ -264,6 +265,7 @@ class SearchTaskRepository:
         db_task = DBSearchTask(
             market_research_id=search_task.market_research_id,
             mode=search_task.mode,
+            topic=search_task.topic,
             query=search_task.query,
             schema_id=search_task.schema_id,
             needs_visual=search_task.needs_visual,
@@ -287,6 +289,7 @@ class SearchTaskRepository:
             id=db_task.id,
             market_research_id=db_task.market_research_id,
             mode=db_task.mode,
+            topic=db_task.topic, 
             query=db_task.query,
             schema_id=db_task.schema_id,
             needs_visual=db_task.needs_visual,

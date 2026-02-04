@@ -66,6 +66,7 @@ class DBSearchTask(Base):
     id = Column(Integer, primary_key=True, index=True)
     market_research_id = Column(Integer, ForeignKey("market_research.id"))
     mode = Column(String)  # "quick" or "deep"
+    topic = Column(String) 
     query = Column(String)
     schema_id = Column(Integer, ForeignKey("schemas.id"), nullable=True)
     needs_visual = Column(Boolean, default=False)
