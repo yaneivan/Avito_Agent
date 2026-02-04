@@ -10,3 +10,7 @@ data/avito_agent.db
 /frontend_next
 /repositories/__pycache__
 /repositories/__pycache__
+/models/__pycache__
+.python-version
+pyproject.toml
+uv.lock
