@@ -43,6 +43,8 @@ function bindEventListeners() {
             handleSendMessage(); // Отправляем сообщение
         }
     });
+
+    document.getElementById('new-search-btn').addEventListener('click', handleNewSearch);
 }
 
 /**
@@ -159,6 +161,35 @@ async function handleSendMessage() {
         sendBtn.disabled = false;
         sendBtn.textContent = 'Отправить';
     }
+}
+
+
+/**
+ * Сброс состояния и начало нового исследования
+ */
+function handleNewSearch() {
+    console.log('Начинаем новое исследование, сбрасываем состояние...');
+
+    // 1. Останавливаем polling
+    window.ResearchPoller.stopPolling();
+
+    // 2. Сбрасываем глобальный объект состояния
+    state.mr_id = null;
+    state.chat_history = [];
+    state.currentStatus = 'CHAT';
+    state.lastChatUpdateId = 0;
+
+    // 3. Очищаем интерфейс
+    Render.clearChatContainer();
+    Render.renderStatus('CHAT');
+
+    // 4. Подготавливаем поле ввода
+    const input = document.getElementById('message-input');
+    input.value = '';
+    input.focus();
+
+    // 5. Опционально: можно вывести системное уведомление в консоль или интерфейс
+    console.log('Приложение готово к новому поиску');
 }
 
 

@@ -65,7 +65,8 @@ class DeepSearchService:
                 analyzed_lots = []
 
                 # Анализируем каждый лот с помощью LLM и схемы
-                for raw_lot in raw_lots:
+                for i, raw_lot in enumerate(raw_lots):
+                    logger.info(f"LLM обрабатывает лот номер {i} из {len(raw_lots)}")
                     analyzed_lot = self._analyze_lot_with_schema(raw_lot, schema)
                     saved_analyzed_lot = self.analyzed_lot_repo.create(analyzed_lot)
                     analyzed_lots.append(saved_analyzed_lot)
@@ -93,8 +94,25 @@ class DeepSearchService:
         if not market_research:
             raise ValueError(f"Исследование с ID {task.market_research_id} не найдено")
 
+        items_for_tiles = []
+        for lot in ranked_lots[:5]:
+            raw = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
+            items_for_tiles.append({
+                "title": raw.title,
+                "price": raw.price,
+                "url": raw.url,
+                "image_path": raw.image_path.replace("\\", "/").replace("./", "") if raw.image_path else None,
+                "is_deep": True,
+                "structured_data": lot.structured_data # Чтобы потом показать по клику
+            })
+
         market_research.chat_history.append(
-            ChatMessage(id=str(uuid.uuid4()), role="assistant", content=result_message)
+            ChatMessage(
+                id=str(uuid.uuid4()), 
+                role="assistant", 
+                content=result_message,
+                items=items_for_tiles
+                )
         )
 
         # Возвращаемся к состоянию CHAT и сохраняем обновленную историю чата

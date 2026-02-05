@@ -40,15 +40,45 @@ header h1 {
     font-weight: bold;
 }
 
+/* Базовый стиль индикатора */
+#status-indicator {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    display: inline-block;
+}
+
+/* Состояние: Готов / Ожидание */
 .status-ready {
     background-color: #d4edda;
     color: #155724;
+    border: 1px solid #c3e6cb;
 }
 
+/* Состояние: Активный поиск */
 .status-searching {
     background-color: #fff3cd;
     color: #856404;
+    border: 1px solid #ffeeba;
     animation: pulse 1.5s infinite;
+}
+
+/* Анимация пульсации */
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
 
 @keyframes pulse {

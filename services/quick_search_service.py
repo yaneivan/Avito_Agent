@@ -49,9 +49,15 @@ class QuickSearchService:
             )
             saved_raw_lot = self.raw_lot_repo.create_or_update(raw_lot)
 
-            # Добавляем информацию о сохраненном лоте в результаты
-            processed_item = item.copy()
-            processed_item['saved_lot_id'] = saved_raw_lot.id
+            processed_item = {
+                "title": saved_raw_lot.title,
+                "price": saved_raw_lot.price,
+                "url": saved_raw_lot.url,
+                # Нормализуем путь: убираем ./ и меняем \ на /
+                "image_path": saved_raw_lot.image_path.replace("\\", "/").replace("./", ""),
+                "saved_lot_id": saved_raw_lot.id
+                # image_base64 сюда НЕ пишем, чтобы не раздувать историю чата
+            }
             processed_results.append(processed_item)
 
         # Обновляем результаты задачи
@@ -96,7 +102,13 @@ class QuickSearchService:
         market_research.state = State.CHAT
 
         # Добавляем только отчет в историю чата, не добавляя результаты поиска
-        report_message = ChatMessage(id=str(uuid.uuid4()), role="assistant", content=report_content)
+        report_message = ChatMessage(
+            id=str(uuid.uuid4()), 
+            role="assistant", 
+            content=report_content,
+            items=processed_results[:5]
+            )
+        logger.info(f"items в report_message: {processed_results[:5]}")
         market_research.chat_history.append(report_message)
 
         # Обновляем всю запись в базе данных, чтобы сохранить изменения в истории чата и состоянии

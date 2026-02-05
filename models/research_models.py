@@ -17,6 +17,7 @@ class ChatMessage(BaseModel):
     content: str
     timestamp: datetime = datetime.now()
     images: Optional[List[str]] = []  # Base64 encoded images
+    items: Optional[List[dict]] = []  
 
 
 class Schema(BaseModel):

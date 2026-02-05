@@ -201,6 +201,7 @@ window.ResearchPoller = new ResearchPoller();
 
 // Экспортируем функции для использования в других модулях
 window.Api = {
-    unifiedChat,
+    startNewResearch,
+    sendChatMessage,
     getMarketResearch
 };
