@@ -196,3 +196,9 @@ async def get_task_results(task_id: int, db: Session = Depends(get_db)):
         "schema": schema.json_schema,
         "rows": results
     }
+
+
+@router.get("/market_research_list")
+async def get_all_researches(db: Session = Depends(get_db)):
+    repo = MarketResearchRepository(db)
+    return repo.get_all_summaries()

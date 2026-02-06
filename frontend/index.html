@@ -15,6 +15,22 @@
             <span id="status-indicator">Готов</span>
             <button id="new-search-btn">Новый поиск</button>
         </div>
+
+        <!-- В хедер рядом с кнопкой "Новый поиск" -->
+        <button id="history-btn">История</button>
+
+        <!-- После <main> добавьте сайдбар -->
+        <div id="history-sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h2>История поисков</h2>
+                <button id="close-history">&times;</button>
+            </div>
+            <div id="history-list">
+                <!-- Сюда будут грузиться чаты -->
+            </div>
+        </div>
+        <!-- Затемнение фона -->
+        <div id="overlay"></div>
     </header>
 
     <main>

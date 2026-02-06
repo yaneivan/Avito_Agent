@@ -196,6 +196,11 @@ class ResearchPoller {
     }
 }
 
+async function getHistoryList() {
+    const response = await fetch(`${API_BASE_URL}/market_research_list`);
+    return await response.json();
+}
+
 // Создаем глобальный экземпляр
 window.ResearchPoller = new ResearchPoller();
 
@@ -203,5 +208,6 @@ window.ResearchPoller = new ResearchPoller();
 window.Api = {
     startNewResearch,
     sendChatMessage,
-    getMarketResearch
+    getMarketResearch, 
+    getHistoryList
 };

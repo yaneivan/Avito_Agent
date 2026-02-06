@@ -138,6 +138,33 @@ class MarketResearchRepository:
             logger.info(f"Содержимое возвращаемой истории: {[msg.content for msg in result.chat_history]}")
 
         return result
+    
+    def get_all_summaries(self) -> List[dict]:
+        # Получаем все записи, сортируем по дате обновления (новые сверху)
+        db_mrs = self.db.query(DBMarketResearch).order_by(DBMarketResearch.updated_at.desc()).all()
+        
+        summaries = []
+        for mr in db_mrs:
+            # Пытаемся достать первое сообщение пользователя для заголовка
+            title = "Пустое исследование"
+            try:
+                history = json.loads(mr.chat_history)
+                if history:
+                    # Ищем первое сообщение от user
+                    for msg in history:
+                        if msg['role'] == 'user':
+                            title = msg['content'][:50] + "..." if len(msg['content']) > 50 else msg['content']
+                            break
+            except:
+                pass
+                
+            summaries.append({
+                "id": mr.id,
+                "title": title,
+                "updated_at": mr.updated_at.isoformat(),
+                "state": mr.state
+            })
+        return summaries
 
 
 class SchemaRepository:

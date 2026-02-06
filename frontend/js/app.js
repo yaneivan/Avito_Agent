@@ -192,6 +192,56 @@ function handleNewSearch() {
     console.log('Приложение готово к новому поиску');
 }
 
+// Открытие истории
+document.getElementById('history-btn').onclick = async () => {
+    const list = await Api.getHistoryList();
+    const container = document.getElementById('history-list');
+    container.innerHTML = '';
+    
+    list.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'history-item';
+        const date = new Date(item.updated_at).toLocaleDateString();
+        div.innerHTML = `
+            <span class="title">${item.title}</span>
+            <span class="date">${date} | Статус: ${item.state}</span>
+        `;
+        div.onclick = () => loadResearch(item.id);
+        container.appendChild(div);
+    });
+    
+    document.getElementById('history-sidebar').classList.add('active');
+    document.getElementById('overlay').style.display = 'block';
+};
+
+// Загрузка конкретного исследования
+async function loadResearch(id) {
+    try {
+        const research = await Api.getMarketResearch(id);
+        state.mr_id = research.id;
+        state.chat_history = research.chat_history || [];
+        state.currentStatus = research.state;
+
+        Render.renderChatHistory(state.chat_history);
+        Render.renderStatus(state.currentStatus);
+        
+        // Закрываем сайдбар
+        document.getElementById('history-sidebar').classList.remove('active');
+        document.getElementById('overlay').style.display = 'none';
+        
+        // Запускаем поллинг, если исследование в процессе
+        window.ResearchPoller.startPolling(state.mr_id);
+        
+    } catch (e) {
+        alert("Ошибка загрузки чата");
+    }
+}
+
+// Закрытие
+document.getElementById('close-history').onclick = document.getElementById('overlay').onclick = () => {
+    document.getElementById('history-sidebar').classList.remove('active');
+    document.getElementById('overlay').style.display = 'none';
+};
 
 // Инициализируем приложение при загрузке DOM
 document.addEventListener('DOMContentLoaded', initApp);
