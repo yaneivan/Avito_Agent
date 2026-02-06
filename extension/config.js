@@ -16,6 +16,7 @@ const CONFIG = {
         ITEM_CARD: '[data-marker="item"]',
         // Селектор для текста описания в выдаче (ищем по специфичному стилю)
         DESCRIPTION_PREVIEW: 'p[style*="--module-max-lines-size"]',
+        PAGINATION_NEXT: '[data-marker="pagination-button/nextPage"]',
         
         // Маркеры для фото
         PHOTO_MARKER: '[data-marker*="item-photo"] img',

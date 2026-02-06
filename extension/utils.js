@@ -1,11 +1,11 @@
 const randomDelay = (min, max) => new Promise(resolve => setTimeout(resolve, Math.random() * (max - min) + min));
 
-function remoteLog(msg, level='info') {
-    if (level === 'error') console.error('[Content]', msg);
-    else console.log('[Content]', msg);
-    try {
-        chrome.runtime.sendMessage({ action: 'log', message: msg, level: level });
-    } catch (e) { }
+function remoteLog(msg, level = 'info') {
+    if (level === 'error') {
+        console.error('[Content]', msg);
+    } else {
+        console.log('[Content]', msg);
+    }
 }
 
 function highlightElement(element, color="red") {
