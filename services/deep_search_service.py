@@ -32,97 +32,93 @@ class DeepSearchService:
         self.analyzed_lot_repo = analyzed_lot_repo
 
     def handle_deep_search_results(self, task_id: int, raw_results: List[dict]) -> MarketResearch:
-        """Обработка результатов глубокого поиска"""
-        logger.info(f"Обрабатываем результаты глубокого поиска для задачи {task_id}")
+            # ВАЖНО: Так как это BackgroundTask, нам нужна своя сессия БД
+            from database import SessionLocal
+            db = SessionLocal()
+            
+            try:
+                # Обновляем репозитории для использования новой сессии
+                self.task_repo.db = db
+                self.raw_lot_repo.db = db
+                self.analyzed_lot_repo.db = db
+                self.mr_repo.db = db
+                self.schema_repo.db = db
 
-        # Обновляем статус задачи
-        task = self.task_repo.update_status(task_id, "completed")
-        if not task:
-            raise ValueError(f"Задача с ID {task_id} не найдена")
+                logger.info(f"Фон: Обрабатываем результаты глубокого поиска для задачи {task_id}")
 
-        # Сохраняем "сырые" лоты
-        raw_lots = []
-        for item in raw_results:
-            # Если есть изображение в base64, сохраняем его
-            image_path = None
-            if item.get('image_base64'):
-                image_path = save_image_from_base64(item['image_base64'], f"deep_{task_id}")
+                # 1. Сохраняем "сырые" лоты (RawLot)
+                raw_lots = []
+                for item in raw_results:
+                    image_path = None
+                    if item.get('image_base64'):
+                        image_path = save_image_from_base64(item['image_base64'], f"deep_{task_id}")
 
-            raw_lot = RawLot(
-                url=item.get('url', ''),
-                title=item.get('title', ''),
-                price=item.get('price', ''),
-                description=item.get('description', ''),
-                image_path=image_path
-            )
-            saved_raw_lot = self.raw_lot_repo.create_or_update(raw_lot)
-            raw_lots.append(saved_raw_lot)
+                    raw_lot = RawLot(
+                        url=item.get('url', ''),
+                        title=item.get('title', ''),
+                        price=item.get('price', ''),
+                        description=item.get('description', ''),
+                        image_path=image_path
+                    )
+                    saved_raw_lot = self.raw_lot_repo.create_or_update(raw_lot)
+                    raw_lots.append(saved_raw_lot)
 
-        # Если у задачи есть схема, применяем её для структурирования данных
-        if task.schema_id:
-            schema = self.schema_repo.get_by_id(task.schema_id)
-            if schema:
-                analyzed_lots = []
+                # 2. Дедупликация (Защита от повторов)
+                existing_analyses = self.analyzed_lot_repo.get_by_task_id(task_id)
+                processed_ids = {a.raw_lot_id for a in existing_analyses}
 
-                # Анализируем каждый лот с помощью LLM и схемы
-                for i, raw_lot in enumerate(raw_lots):
-                    logger.info(f"LLM обрабатывает лот номер {i} из {len(raw_lots)}")
-                    analyzed_lot = self._analyze_lot_with_schema(raw_lot, schema, task_id)
-                    analyzed_lot.search_task_id = task_id 
-                    saved_analyzed_lot = self.analyzed_lot_repo.create(analyzed_lot)
-                    analyzed_lots.append(saved_analyzed_lot)
+                task = self.task_repo.get_by_id(task_id)
+                schema = self.schema_repo.get_by_id(task.schema_id)
+                
+                analyzed_lots = list(existing_analyses) 
 
-                # Если результатов много, применяем турнирный реранкинг
-                if len(analyzed_lots) > 5:
-                    ranked_lots = self._apply_tournament_ranking(analyzed_lots, schema)
-                else:
-                    ranked_lots = analyzed_lots
+                # 3. Основной цикл LLM
+                if schema:
+                    for i, raw_lot in enumerate(raw_lots):
+                        if raw_lot.id in processed_ids:
+                            logger.info(f"Скип лота {raw_lot.id}")
+                            continue
 
-                result_message = self._generate_analytical_summary(ranked_lots[:10], schema, task.topic)
-            else:
-                # Если схема не найдена, просто форматируем сырые результаты
-                from .quick_search_service import QuickSearchService
-                quick_service = QuickSearchService(self.mr_repo, self.task_repo, self.raw_lot_repo)
-                result_message = quick_service._format_quick_search_results(raw_results)
-        else:
-            # Если нет схемы, просто форматируем сырые результаты
-            from .quick_search_service import QuickSearchService
-            quick_service = QuickSearchService(self.mr_repo, self.task_repo, self.raw_lot_repo)
-            result_message = quick_service._format_quick_search_results(raw_results)
+                        logger.info(f"LLM лот {i+1}/{len(raw_lots)}")
+                        analyzed_lot = self._analyze_lot_with_schema(raw_lot, schema, task_id)
+                        saved_analyzed_lot = self.analyzed_lot_repo.create(analyzed_lot)
+                        analyzed_lots.append(saved_analyzed_lot)
 
-        # Добавляем результаты в историю чата
-        market_research = self.mr_repo.get_by_id(task.market_research_id)
-        if not market_research:
-            raise ValueError(f"Исследование с ID {task.market_research_id} не найдено")
+                    # 4. Ранжирование и финализация
+                    if len(analyzed_lots) > 5:
+                        ranked_lots = self._apply_tournament_ranking(analyzed_lots, schema)
+                    else:
+                        ranked_lots = analyzed_lots
 
-        items_for_tiles = []
-        for lot in ranked_lots[:5]:
-            raw = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
-            items_for_tiles.append({
-                "title": raw.title,
-                "price": raw.price,
-                "url": raw.url,
-                "image_path": raw.image_path.replace("\\", "/").replace("./", "") if raw.image_path else None,
-                "is_deep": True,
-                "structured_data": lot.structured_data # Чтобы потом показать по клику
-            })
+                    result_message = self._generate_analytical_summary(ranked_lots[:10], schema, task.topic)
+                    
+                    # Подготовка карточек для чата
+                    items_for_tiles = []
+                    for lot in ranked_lots[:5]:
+                        raw = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
+                        items_for_tiles.append({
+                            "title": raw.title, "price": raw.price, "url": raw.url,
+                            "image_path": raw.image_path.replace("\\", "/").replace("./", "") if raw.image_path else None,
+                            "is_deep": True, "structured_data": lot.structured_data
+                        })
 
-        market_research.chat_history.append(
-            ChatMessage(
-                id=str(uuid.uuid4()), 
-                role="assistant", 
-                content=result_message,
-                items=items_for_tiles, 
-                task_id=task_id  
-                )
-        )
+                    # 5. Обновляем ЧАТ (только когда всё готово!)
+                    market_research = self.mr_repo.get_by_id(task.market_research_id)
+                    market_research.chat_history.append(
+                        ChatMessage(id=str(uuid.uuid4()), role="assistant", content=result_message, items=items_for_tiles, task_id=task_id)
+                    )
+                    market_research.state = State.CHAT
+                    self.mr_repo.update(market_research)
 
-        # Возвращаемся к состоянию CHAT и сохраняем обновленную историю чата
-        market_research.state = State.CHAT
-        self.mr_repo.update(market_research)
+                # 6. И только теперь статус COMPLETED
+                self.task_repo.update_status(task_id, "completed")
+                logger.info(f"Фоновая задача {task_id} полностью завершена")
 
-        logger.info(f"Результаты глубокого поиска обработаны и сохранены для исследования {task.market_research_id}")
-        return market_research
+            except Exception as e:
+                logger.error(f"Ошибка в фоне: {e}")
+                self.task_repo.update_status(task_id, "failed")
+            finally:
+                db.close() # Всегда закрываем сессию
 
     def _analyze_lot_with_schema(self, raw_lot: RawLot, schema: Schema, task_id: int) -> AnalyzedLot:
         """Анализ лота с использованием схемы и LLM"""

@@ -21,6 +21,7 @@ from repositories.research_repository import (
 from utils.logger import logger, extension_logger
 from typing import List
 import json
+from fastapi import BackgroundTasks 
 
 router = APIRouter()
 
@@ -123,7 +124,10 @@ async def get_task(db: Session = Depends(get_db)):
     )
 
 @router.post("/submit_results")
-async def submit_results(request: SubmitResultsRequest, db: Session = Depends(get_db)):
+async def submit_results(
+    request: SubmitResultsRequest, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)):
     """Отправка результатов на сервер (от браузерного расширения)"""
     extension_logger.info(f"Получены результаты для задачи {request.task_id}")
 
@@ -140,17 +144,17 @@ async def submit_results(request: SubmitResultsRequest, db: Session = Depends(ge
         if task.mode == "quick":
             # Обработка результатов быстрого поиска
             market_research = service.handle_quick_search_results(request.task_id, request.items)
+            return {"status": "success"} 
         elif task.mode == "deep":
+            service.task_repo.update_status(request.task_id, "processing")
             # Обработка результатов глубокого поиска
-            market_research = service.handle_deep_search_results(request.task_id, request.items)
+            background_tasks.add_task(service.deep_search_service.handle_deep_search_results, request.task_id, request.items)
+            # market_research = service.handle_deep_search_results(request.task_id, request.items)
+            return {"status": "processing_started"}
         else:
             extension_logger.error(f"Неизвестный режим задачи: {task.mode}")
             raise HTTPException(status_code=400, detail="Unknown task mode")
 
-        extension_logger.info(f"Результаты задачи {request.task_id} успешно обработаны")
-
-        # Возвращаем обновленное состояние исследования, чтобы клиент мог обновить чат
-        return market_research
     except Exception as e:
         extension_logger.error(f"Ошибка при обработке результатов задачи {request.task_id}: {e}")
 

@@ -70,21 +70,20 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     }
 });
 
+// Слушатель сообщений от контент-скриптов
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'scrapedData') {
-        const itemsCount = message.data.items ? message.data.items.length : 0;
-        log(`📥 Финиш! Товаров: ${itemsCount}`);
-
+    // Новое действие: закрытие вкладки после успеха
+    if (message.action === 'closeCurrentTab') {
         if (sender.tab) {
-             const tabId = sender.tab.id;
-             delete activeTabs[tabId];
-             chrome.tabs.remove(tabId);
+            const tabId = sender.tab.id;
+            log(`🎯 Задача завершена. Закрываю вкладку ${tabId}`);
+            delete activeTabs[tabId];
+            chrome.tabs.remove(tabId);
         }
+    }
 
-        fetch(`${SERVER_URL}/api/submit_results`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(message.data)
-        }).catch(err => log(`Ошибка отправки: ${err.message}`, 'error'));
+    // Это можно оставить для отладки в консоли фоновой страницы
+    if (message.action === 'log') {
+        log(`(Content) ${message.message}`, message.level);
     }
 });
