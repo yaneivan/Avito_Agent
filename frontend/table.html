@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сравнение лотов — Avito Agent</title>
+    <style>
+        /* 1. БАЗОВЫЕ НАСТРОЙКИ СТРАНИЦЫ */
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            margin: 0; 
+            padding: 0;
+            background-color: #f3f4f6; 
+            color: #1f2937;
+            min-height: 100vh;
+            display: block; /* Важно: убираем flex чата */
+            overflow-y: auto !important; /* Разрешаем вертикальный скролл */
+        }
+
+        .container { 
+            width: 98%;
+            margin: 20px auto; 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        h1 { 
+            font-size: 1.5rem;
+            margin-bottom: 20px; 
+            color: #111827;
+            border-bottom: 2px solid #f3f4f6;
+            padding-bottom: 15px;
+        }
+
+        /* 2. ОБЕРТКА ТАБЛИЦЫ С ГОРИЗОНТАЛЬНЫМ СКРОЛЛОМ */
+        #table-wrapper {
+            width: 100%;
+            overflow-x: auto; 
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+        }
+
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            table-layout: auto; /* Позволяет колонкам подстраиваться под контент */
+            min-width: 1100px;
+        }
+
+        /* 3. ЯЧЕЙКИ И ЗАГОЛОВКИ */
+        th, td { 
+            padding: 12px 15px; 
+            border-bottom: 1px solid #e5e7eb; 
+            text-align: left; 
+            vertical-align: top; /* Текст начинается сверху ячейки */
+        }
+
+        th { 
+            background: #f9fafb; 
+            font-weight: 700; 
+            color: #4b5563; 
+            white-space: nowrap; 
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+
+        th:hover { background: #f3f4f6; }
+
+        /* 4. СПЕЦИФИЧЕСКИЕ КОЛОНКИ (УПРАВЛЯЕМ ШИРИНОЙ) */
+        
+        /* Колонка Фото */
+        .photo-cell { width: 70px; text-align: center; }
+        .thumb-img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #eee; }
+
+        /* Колонка Название (Самая широкая) */
+        .title-cell { min-width: 250px; max-width: 350px; }
+        .title-link { 
+            color: #00aff0; 
+            text-decoration: none; 
+            font-weight: 600; 
+            font-size: 0.9rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+
+        /* Узкие колонки для цифр */
+        .price-cell, .score-cell, .narrow-cell { 
+            width: 1%; /* Схлопываются до минимально возможной ширины */
+            white-space: nowrap; 
+            font-weight: 700;
+        }
+
+        .score-cell { color: #00aff0; font-size: 1.1rem; text-align: center; }
+
+        /* Динамические колонки из схемы */
+        .dynamic-cell { font-size: 0.85rem; color: #374151; }
+
+        /* 5. ИНТЕРАКТИВНЫЕ ЭЛЕМЕНТЫ */
+        
+        /* Заметки (Details) */
+        .relevance-details { min-width: 150px; font-size: 0.85rem; }
+        .relevance-details summary { color: #00aff0; cursor: pointer; font-weight: 600; outline: none; }
+        .relevance-text { 
+            background: #f0f9ff; 
+            padding: 10px; 
+            border-radius: 6px; 
+            margin-top: 5px; 
+            border-left: 3px solid #00aff0;
+            color: #1e40af;
+        }
+
+        /* Тултип для фото */
+        .thumbnail-container { position: relative; display: inline-block; }
+        .tooltip-content {
+            visibility: hidden; width: 200px; background: #1f2937; color: #fff;
+            padding: 10px; border-radius: 8px; position: absolute; z-index: 10;
+            bottom: 110%; left: 50%; transform: translateX(-50%);
+            opacity: 0; transition: 0.2s; font-size: 0.75rem; line-height: 1.4;
+        }
+        .thumbnail-container:hover .tooltip-content { visibility: visible; opacity: 1; }
+
+        .loading { text-align: center; padding: 50px; font-size: 1.2rem; color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="table-title">Загрузка данных...</h1>
+        <div id="table-wrapper">
+            <div class="loading">Анализируем лоты...</div>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const taskId = urlParams.get('task_id');
+
+        async function loadTable() {
+            if (!taskId) {
+                document.getElementById('table-wrapper').innerHTML = '<div class="loading">ID задачи не указан</div>';
+                return;
+            }
+            try {
+                const response = await fetch(`/api/search_task/${taskId}/results`);
+                if (!response.ok) throw new Error('Ошибка сервера');
+                const data = await response.json();
+                document.getElementById('table-title').textContent = data.topic || 'Результаты исследования';
+                if (data.rows.length === 0) {
+                    document.getElementById('table-wrapper').innerHTML = '<div class="loading">Нет данных</div>';
+                    return;
+                }
+                renderTable(data);
+            } catch (error) {
+                document.getElementById('table-wrapper').innerHTML = '<div class="loading">Ошибка загрузки</div>';
+            }
+        }
+
+        function renderTable(data) {
+            let html = `<table id="research-table">
+                <thead>
+                    <tr>
+                        <th class="photo-cell">Фото</th>
+                        <th data-type="text">Товар</th>
+                        <th data-type="number">Цена</th>`;
+            
+            const schemaKeys = Object.keys(data.schema);
+            schemaKeys.forEach(key => {
+                const label = data.schema[key].description || key;
+                html += `<th data-type="auto">${label}</th>`;
+            });
+
+            html += `<th>Заметки</th><th data-type="number" class="score-cell">Рейтинг</th></tr>
+                </thead><tbody>`;
+
+            data.rows.forEach(row => {
+                let imgUrl = '';
+                if (row.image_path) {
+                    const fileName = row.image_path.split(/[\\/]/).pop(); 
+                    imgUrl = `/images/${fileName}`;
+                } else {
+                    imgUrl = 'https://via.placeholder.com/60?text=No+Photo';
+                }
+
+                html += `<tr>
+                    <td class="photo-cell">
+                        <div class="thumbnail-container">
+                            <img src="${imgUrl}" class="thumb-img" onerror="this.src='https://via.placeholder.com/60?text=Error'">
+                            <div class="tooltip-content"><strong>Визуально:</strong><br>${row.image_description || 'Нет данных'}</div>
+                        </div>
+                    </td>
+                    <td class="title-cell">
+                        <a href="${row.url}" class="title-link" target="_blank">${row.title}</a>
+                    </td>
+                    <td class="price-cell" data-value="${cleanNumber(row.price)}">${row.price}</td>`;
+                
+                schemaKeys.forEach(key => {
+                    const val = row.structured_data ? row.structured_data[key] : null;
+                    const displayVal = (val === true) ? 'Да' : (val === false) ? 'Нет' : (val || '-');
+                    html += `<td class="dynamic-cell" data-value="${val}">${displayVal}</td>`;
+                });
+
+                html += `<td>
+                        <details class="relevance-details">
+                            <summary>Заметки ИИ</summary>
+                            <div class="relevance-text">${row.relevance_note || 'Нет примечаний'}</div>
+                        </details>
+                    </td>
+                    <td class="score-cell" data-value="${row.score || 0}">${row.score ? row.score.toFixed(1) : '0.0'}</td>
+                </tr>`;
+            });
+
+            html += `</tbody></table>`;
+            document.getElementById('table-wrapper').innerHTML = html;
+            makeTableSortable(document.getElementById('research-table'));
+        }
+
+        function cleanNumber(val) {
+            if (typeof val === 'number') return val;
+            const cleaned = String(val).replace(/[^\d.,]/g, '').replace(',', '.');
+            return parseFloat(cleaned) || 0;
+        }
+
+        function makeTableSortable(table) {
+            const headers = table.querySelectorAll('th');
+            const tbody = table.querySelector('tbody');
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    const isAscending = header.classList.contains('sort-asc');
+                    headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+                    rows.sort((rowA, rowB) => {
+                        const cellA = rowA.children[index];
+                        const cellB = rowB.children[index];
+                        let vA = cellA.getAttribute('data-value') || cellA.innerText;
+                        let vB = cellB.getAttribute('data-value') || cellB.innerText;
+                        const nA = parseFloat(vA);
+                        const nB = parseFloat(vB);
+                        if (!isNaN(nA) && !isNaN(nB)) return isAscending ? nB - nA : nA - nB;
+                        return isAscending ? vB.toLowerCase().localeCompare(vA.toLowerCase(), 'ru') : vA.toLowerCase().localeCompare(vB.toLowerCase(), 'ru');
+                    });
+                    header.classList.add(isAscending ? 'sort-desc' : 'sort-asc');
+                    rows.forEach(r => tbody.appendChild(r));
+                });
+            });
+        }
+        loadTable();
+    </script>
+</body>
+</html>

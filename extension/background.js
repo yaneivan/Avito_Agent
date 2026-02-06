@@ -1,13 +1,12 @@
 const SERVER_URL = 'http://127.0.0.1:8001';
 
-async function log(message, level = 'info') {
-    try {
-        await fetch(`${SERVER_URL}/api/log`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: 'background', message: String(message), level })
-        });
-    } catch (e) { }
+function log(message, level = 'info') {
+    const prefix = '[Background]';
+    if (level === 'error') {
+        console.error(prefix, message);
+    } else {
+        console.log(prefix, message);
+    }
 }
 
 log('Background v5.0 (Dynamic Limit) запущен.');
@@ -17,16 +16,25 @@ let activeTabs = {};
 setInterval(async () => {
     try {
         const response = await fetch(`${SERVER_URL}/api/get_task`);
+        
+        // 1. Если задач нет (204), просто выходим из функции без ошибки
+        if (response.status === 204) {
+            return; 
+        }
+
+        // 2. Если другой плохой статус (404, 500 и т.д.), выходим
         if (!response.ok) return;
+
+        // 3. Теперь парсим, так как мы уверены, что там статус 200 и есть данные
         const data = await response.json();
 
-        if (data.task_id) {
+        if (data && data.task_id) {
             log(`🎯 Задача ID=${data.task_id} (Limit=${data.limit})`);
-            // Передаем active_tab и limit
             performSearch(data.task_id, data.query, data.active_tab, data.limit);
         }
     } catch (e) { 
-        console.error(e);
+        // Теперь здесь будут только реальные ошибки сети, а не SyntaxError
+        console.error("Ошибка в цикле опроса задач:", e);
     }
 }, 3000);
 
@@ -78,9 +86,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(message.data)
         }).catch(err => log(`Ошибка отправки: ${err.message}`, 'error'));
-    }
-
-    if (message.action === 'log') {
-        log(`(Content) ${message.message}`, message.level);
     }
 });

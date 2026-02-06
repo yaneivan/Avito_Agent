@@ -1,0 +1,521 @@
+/* ==========================================================================
+   ОБЩИЕ СТИЛИ И СЕТКА
+   ========================================================================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #f3f4f6;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    color: #1f2937;
+    overflow: hidden; /* Чтобы прокручивался только чат */
+}
+
+/* ==========================================================================
+   ШАПКА (HEADER) - Идеальная центровка
+   ========================================================================== */
+header {
+    background-color: white;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 20px;
+    z-index: 100;
+}
+
+.header-content {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.header-left { display: flex; justify-content: flex-start; }
+.header-right { display: flex; justify-content: flex-end; }
+
+.header-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.header-center h1 {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #111827;
+    letter-spacing: -0.025em;
+}
+
+/* Статус */
+#status-indicator {
+    margin-top: 4px;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    transition: all 0.3s ease;
+}
+
+.status-ready { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.status-searching { 
+    background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; 
+    animation: pulse-opacity 1.5s infinite;
+}
+
+@keyframes pulse-opacity { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* Кнопки в шапке */
+#history-btn, #new-search-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid #d1d5db;
+}
+
+#history-btn { background-color: white; color: #374151; }
+#history-btn:hover { background-color: #f9fafb; border-color: #9ca3af; }
+
+#new-search-btn { background-color: #00aff0; color: white; border: none; }
+#new-search-btn:hover { background-color: #008ecc; transform: translateY(-1px); }
+
+/* ==========================================================================
+   ОСНОВНАЯ ОБЛАСТЬ (ЧАТ)
+   ========================================================================== */
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    max-width: 1000px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 20px;
+    overflow-x: hidden; /* Запрещаем выезд вбок на уровне главного блока */
+    position: relative;
+    z-index: 10;
+}
+
+#chat-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden; /* Запрещаем выезд вбок внутри чата */
+    padding: 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Скроллбар для Chrome/Safari */
+#chat-container::-webkit-scrollbar { width: 6px; }
+#chat-container::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
+
+/* Сообщения */
+.message {
+    max-width: 85%;
+    padding: 14px 18px;
+    border-radius: 16px;
+    line-height: 1.6;
+    font-size: 0.95rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    
+    /* ИСПРАВЛЕНИЕ ПЕРЕНОСОВ: */
+    word-wrap: break-word;       /* Старая поддержка */
+    overflow-wrap: anywhere;    /* Современный стандарт: рвет строку везде, где надо */
+    word-break: normal;
+    position: relative;
+}
+
+/* Дополнительная защита для контента внутри */
+.message-content {
+    width: 100%;
+    overflow-wrap: anywhere;
+}
+
+
+.message-user {
+    align-self: flex-end;
+    background-color: #00aff0;
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.message-bot {
+    align-self: flex-start;
+    background-color: white;
+    color: #374151;
+    border-bottom-left-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+
+/* Рендеринг Markdown внутри сообщений */
+.message-content p { margin-bottom: 10px; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content strong { color: #111827; }
+
+/* Кнопка таблицы внутри сообщения бота */
+.view-table-btn {
+    margin-top: 12px;
+    display: inline-flex;
+    align-items: center;
+    background-color: #f3f4f6;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.view-table-btn:hover { background-color: #e5e7eb; border-color: #9ca3af; }
+
+/* ==========================================================================
+   КАРТОЧКИ ТОВАРОВ (ПЛИТКА)
+   ========================================================================== */
+.lots-container {
+    margin-top: 15px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.lot-card {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.lot-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+
+.lot-image {
+    width: 100%;
+    height: 130px;
+    object-fit: cover;
+    background-color: #f3f4f6;
+}
+
+.lot-info { padding: 10px; flex: 1; display: flex; flex-direction: column; }
+
+.lot-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    height: 2.5em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.lot-price { color: #10b981; font-weight: 800; font-size: 1rem; margin-bottom: 8px; }
+
+.lot-link {
+    font-size: 0.75rem;
+    color: #00aff0;
+    text-decoration: none;
+    font-weight: 600;
+    margin-top: auto;
+}
+
+/* ==========================================================================
+   ОБЛАСТЬ ВВОДА (INPUT AREA)
+   ========================================================================== */
+#input-area {
+    padding: 20px 0;
+    background-color: #f3f4f6;
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+}
+
+#message-input {
+    flex: 1;
+    padding: 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    resize: none;
+    font-family: inherit;
+    font-size: 0.95rem;
+    max-height: 150px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    outline: none;
+}
+
+#message-input:focus { border-color: #00aff0; box-shadow: 0 0 0 3px rgba(0, 175, 240, 0.1); }
+
+#send-btn {
+    background-color: #10b981;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 12px;
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    height: 48px;
+}
+
+#send-btn:hover { background-color: #059669; transform: scale(1.02); }
+#send-btn:disabled { background-color: #9ca3af; cursor: not-allowed; transform: none; }
+
+/* ==========================================================================
+   ИСТОРИЯ (SIDEBAR)
+   ========================================================================== */
+.sidebar {
+    position: fixed;
+    right: -350px;
+    top: 0;
+    width: 350px;
+    height: 100%;
+    background: white;
+    box-shadow: -10px 0 30px rgba(0,0,0,0.1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar.active { transform: translateX(-350px); }
+
+#overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(2px);
+    z-index: 999;
+}
+
+.sidebar-header {
+    padding: 24px 20px;
+    border-bottom: 1px solid #f3f4f6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#history-list { flex: 1; overflow-y: auto; padding: 12px; }
+
+.history-item {
+    padding: 14px;
+    margin-bottom: 10px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.history-item:hover { border-color: #00aff0; background: #f0f9ff; }
+
+.history-info { flex: 1; min-width: 0; }
+.history-info .title { 
+    font-weight: 600; font-size: 0.85rem; display: block; 
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+}
+.history-info .date { font-size: 0.75rem; color: #6b7280; }
+
+.delete-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: #fee2e2; color: #ef4444; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+
+.delete-btn:hover { background: #ef4444; color: white; }
+
+#close-history {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid #d1d5db;
+    background: #f3f4f6; cursor: pointer;
+}
+
+
+/* Контейнер теперь не ограничивает таблицу жестко */
+.container { 
+    max-width: 95%; /* Даем больше пространства на широких экранах */
+    margin: 20px auto; 
+    background: white; 
+    padding: 20px; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+/* ОБЯЗАТЕЛЬНО: Обертка для прокрутки */
+#table-wrapper {
+    width: 100%;
+    overflow-x: auto; /* Включает горизонтальную прокрутку */
+    margin-top: 20px;
+    border: 1px solid #edf2f7;
+    border-radius: 8px;
+}
+
+table {
+    min-width: 1200px; /* Фиксируем минимальную ширину, чтобы колонки не слипались */
+    table-layout: fixed; /* Помогает браузеру соблюдать ширину колонок */
+}
+
+th, td { 
+    padding: 12px 10px; 
+    font-size: 0.9rem; 
+    vertical-align: middle; /* Чтобы текст был по центру высоты */
+}
+
+/* Фиксируем заголовки, чтобы они не переносились слишком криво */
+th {
+    white-space: nowrap; 
+    background: #f8fafc;
+    position: sticky;
+    top: 0; /* Опционально: фиксация заголовка при вертикальном скролле */
+}
+
+/* Ограничение колонки с названием */
+.title-cell {
+    width: 250px; /* Фиксируем ширину */
+}
+
+.title-link {
+    display: block;
+    color: #00aff0;
+    text-decoration: none;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3; /* Максимум 3 строки */
+    -webkit-box-orient: vertical;
+}
+
+
+/* Заметки ИИ (Details) - чтобы не расширяли ячейку */
+.relevance-details {
+    width: 150px;
+}
+
+/* 1. Настройки страницы: разрешаем скролл вниз */
+body { 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+    padding: 0; 
+    margin: 0;
+    background-color: #f5f7f9; 
+    color: #2d3436; 
+    /* Убираем ограничения по высоте, чтобы страница листалась вниз */
+    height: auto !important; 
+    min-height: 100vh;
+    overflow-y: auto !important; 
+}
+
+/* 2. Контейнер: делаем его на всю ширину */
+.container { 
+    max-width: 98% !important; /* Почти на весь экран */
+    width: calc(100% - 40px);
+    margin: 20px auto; 
+    background: white; 
+    padding: 20px; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+h1 { 
+    margin-bottom: 25px; 
+    color: #2c3e50; 
+    border-bottom: 2px solid #eee; 
+    padding-bottom: 15px; 
+}
+
+/* 3. Обертка таблицы: только горизонтальный скролл */
+#table-wrapper {
+    width: 100%;
+    overflow-x: auto; /* Появится полоса прокрутки вправо, если колонок много */
+    overflow-y: hidden; /* Запрещаем внутренний вертикальный скролл, чтобы листалась вся страница */
+    border: 1px solid #edf2f7;
+    border-radius: 8px;
+    background: white;
+}
+
+/* 4. Сама таблица */
+table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    /* Убираем table-layout: fixed, чтобы колонки подстраивались под контент */
+    table-layout: auto !important; 
+}
+
+th, td { 
+    padding: 12px 15px; 
+    border-bottom: 1px solid #edf2f7; 
+    text-align: left; 
+    word-wrap: break-word;
+}
+
+/* Заголовки: не даем тексту внутри них переноситься, чтобы не было "лесенки" */
+th { 
+    background: #f8fafc; 
+    font-weight: 600; 
+    color: #4a5568; 
+    white-space: nowrap; /* Заголовки в одну строку */
+    cursor: pointer;
+    position: relative;
+}
+
+th:hover { background: #edf2f7; }
+
+/* 5. Настройка колонок */
+
+/* Колонка с названием */
+.title-cell {
+    min-width: 250px;
+    max-width: 400px;
+}
+
+.title-link {
+    color: #00aff0;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* Ограничиваем название 2 строками */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Колонка цены и рейтинга */
+.price-cell, .score-cell {
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Заметки ИИ (Details) */
+.relevance-details {
+    min-width: 150px;
+}
+
+.relevance-text {
+    font-size: 0.85rem;
+    background: #f1f5f9;
+    padding: 10px;
+    border-radius: 6px;
+    margin-top: 5px;
+    border-left: 3px solid #00aff0;
+}
+
+/* Стили для миниатюр */
+.thumb-img {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 6px;
+}

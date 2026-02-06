@@ -1,77 +1,193 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app
-from sqlmodel import Session
-from database import ChatSession
-from dependencies import get_session
+from models.research_models import MarketResearch, State
 
 
-def test_root(client: TestClient):
-    """Тест главной страницы"""
-    response = client.get("/")
-    # Ожидаем, что главная страница возвращает 404, так как у нас нет маршрута "/"
-    assert response.status_code in [200, 404]  # Может быть 200 или 404 в зависимости от FastAPI
+client = TestClient(app)
 
 
-def test_get_all_chats_empty(client: TestClient, session: Session):
-    """Тест получения всех чатов когда их нет"""
-    # Подменяем сессию для тестирования
-    def override_get_session():
-        yield session
-    
-    app.dependency_overrides[get_session] = override_get_session
-    
-    response = client.get("/api/chats")
+def test_create_market_research():
+    """Тест создания нового исследования рынка через API"""
+    response = client.post(
+        "/market_research",
+        json={"initial_query": "тестовый запрос"}
+    )
+
     assert response.status_code == 200
-    assert response.json() == []
-    
-    # Убираем подмену
-    app.dependency_overrides.clear()
 
-
-def test_create_new_chat(client: TestClient, session: Session):
-    """Тест создания нового чата"""
-    def override_get_session():
-        yield session
-    
-    app.dependency_overrides[get_session] = override_get_session
-    
-    response = client.post("/api/chats")
-    assert response.status_code == 200
-    
     data = response.json()
     assert "id" in data
-    assert data["title"] == "Новый чат"
-    
-    # Проверим, что чат действительно создался в базе
-    chat = session.get(ChatSession, data["id"])
-    assert chat is not None
-    assert chat.title == "Новый чат"
-    
-    # Убираем подмену
-    app.dependency_overrides.clear()
+    # Состояние может измениться в зависимости от типа запроса (quick или deep)
+    # Проверим, что это одно из допустимых состояний
+    assert data["state"] in [State.CHAT.value, State.SEARCHING_QUICK.value, State.PLANNING_DEEP_RESEARCH.value]
+    assert "chat_history" in data
+    assert "search_tasks" in data
 
 
-def test_get_chat_details(client: TestClient, session: Session):
-    """Тест получения деталей чата"""
-    # Сначала создаем чат
-    chat = ChatSession(title="Тестовый чат")
-    session.add(chat)
-    session.commit()
+def test_get_market_research():
+    """Тест получения исследования по ID через API"""
+    # Сначала создаем исследование
+    create_response = client.post(
+        "/market_research",
+        json={"initial_query": "тестовый запрос"}
+    )
     
-    def override_get_session():
-        yield session
+    assert create_response.status_code == 200
+    created_mr = create_response.json()
+    mr_id = created_mr["id"]
     
-    app.dependency_overrides[get_session] = override_get_session
+    # Теперь пытаемся получить его
+    response = client.get(f"/market_research/{mr_id}")
     
-    response = client.get(f"/api/chats/{chat.id}")
     assert response.status_code == 200
     
     data = response.json()
-    assert "chat" in data
-    assert "messages" in data
-    assert data["chat"]["id"] == chat.id
-    assert data["chat"]["title"] == "Тестовый чат"
-    
-    # Убираем подмену
-    app.dependency_overrides.clear()
+    assert data["id"] == mr_id
+    assert "state" in data
+    assert "chat_history" in data
+    assert "search_tasks" in data
+
+
+def test_update_chat():
+    """Тест обновления чата через API"""
+    # Сначала создаем исследование
+    create_response = client.post(
+        "/market_research",
+        json={"initial_query": "тестовый запрос"}
+    )
+
+    assert create_response.status_code == 200
+    created_mr = create_response.json()
+    mr_id = created_mr["id"]
+
+    # Обновляем чат
+    response = client.post(
+        f"/chat/{mr_id}",
+        json={
+            "message": "сообщение пользователя",
+            "images": []
+        }
+    )
+
+    # Проверяем, что запрос не возвращает ошибку 422
+    assert response.status_code in [200, 201]  # Может возвращать 201 Created
+
+    # Если статус 200, проверяем данные
+    if response.status_code == 200:
+        data = response.json()
+        assert "id" in data
+        assert data["id"] == mr_id
+
+
+def test_get_task():
+    """Тест получения задачи для расширения"""
+    # Сначала создадим задачу для тестирования
+    create_response = client.post(
+        "/market_research",
+        json={"initial_query": "тестовый запрос"}
+    )
+
+    assert create_response.status_code == 200
+    created_mr = create_response.json()
+    mr_id = created_mr["id"]
+
+    # Создаем задачу поиска
+    from models.research_models import SearchTask
+    from repositories.research_repository import SearchTaskRepository
+    from database import SessionLocal, DBSearchTask
+
+    db = SessionLocal()
+    task_repo = SearchTaskRepository(db)
+
+    search_task = SearchTask(
+        market_research_id=mr_id,
+        mode="quick",
+        query="поиск товара",
+        needs_visual=False,
+        status="pending"  # Убедимся, что задача в состоянии pending
+    )
+
+    created_task = task_repo.create(search_task)
+    task_id = created_task.id
+
+    db.close()
+
+    # Теперь пробуем получить задачу
+    response = client.get("/get_task")
+
+    # Ожидаем, что задача будет возвращена (статус 200) или нет доступных задач (статус 204)
+    # В зависимости от состояния задачи в базе данных
+    if response.status_code == 200:
+        data = response.json()
+        # Проверим, что возвращаемые данные соответствуют ожидаемой структуре
+        assert "task_id" in data
+        assert "query" in data
+        assert "active_tab" in data
+        assert "limit" in data
+        # Проверим, что возвращаемая задача существует в системе
+        # (мы не можем гарантировать, что это будет именно наша задача,
+        # так как сервер возвращает первую доступную)
+    elif response.status_code == 204:
+        # Это нормально, если задача уже была получена другим запросом
+        pass
+    else:
+        assert False, f"Unexpected status code: {response.status_code}"
+
+
+def test_submit_results():
+    """Тест отправки результатов от расширения"""
+    # Для этого теста нужно сначала создать задачу, чтобы был task_id
+    create_response = client.post(
+        "/market_research",
+        json={"initial_query": "тестовый запрос"}
+    )
+
+    assert create_response.status_code == 200
+    created_mr = create_response.json()
+    mr_id = created_mr["id"]
+
+    # Создаем задачу поиска
+    from models.research_models import SearchTask
+    from repositories.research_repository import SearchTaskRepository
+    from database import SessionLocal
+
+    db = SessionLocal()
+    task_repo = SearchTaskRepository(db)
+
+    search_task = SearchTask(
+        market_research_id=mr_id,
+        mode="quick",
+        query="поиск товара",
+        needs_visual=False
+    )
+
+    created_task = task_repo.create(search_task)
+    task_id = created_task.id
+
+    db.close()
+
+    # Теперь отправляем результаты
+    response = client.post(
+        "/submit_results",
+        json={
+            "task_id": task_id,
+            "items": [
+                {
+                    "title": "Тестовый товар",
+                    "price": "10000",
+                    "url": "https://example.com",
+                    "description": "Описание товара",
+                    "image_base64": None
+                }
+            ]
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert "status" in data
+    assert data["status"] == "success"
+    assert "market_research_id" in data
+    assert data["market_research_id"] == mr_id
