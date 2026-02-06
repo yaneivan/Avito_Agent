@@ -159,3 +159,40 @@ async def submit_results(request: SubmitResultsRequest, db: Session = Depends(ge
 
         logger.exception(f"Full traceback for task {request.task_id}:")
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@router.get("/search_task/{task_id}/results")
+async def get_task_results(task_id: int, db: Session = Depends(get_db)):
+    task_repo = SearchTaskRepository(db)
+    analyzed_repo = AnalyzedLotRepository(db)
+    schema_repo = SchemaRepository(db)
+    raw_repo = RawLotRepository(db)
+
+    task = task_repo.get_by_id(task_id)
+    if not task: raise HTTPException(status_code=404)
+
+    schema = schema_repo.get_by_id(task.schema_id)
+    analyzed_lots = analyzed_repo.get_by_task_id(task_id)
+
+    # Собираем данные: объединяем проанализированные данные с заголовком и ценой из RawLot
+    results = []
+    for al in analyzed_lots:
+        raw = raw_repo.get_by_id(al.raw_lot_id)
+        results.append({
+            "id": al.id,
+            "title": raw.title,
+            "price": raw.price,
+            "url": raw.url,
+            "image_path": raw.image_path,
+            "structured_data": al.structured_data, 
+            "relevance_note": al.relevance_note,
+            "image_description": al.image_description_and_notes,
+            "score": al.tournament_score
+        })
+
+    return {
+        "topic": task.topic,
+        "schema": schema.json_schema,
+        "rows": results
+    }

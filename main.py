@@ -34,8 +34,9 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 
 # Подключаем статические файлы для нашего нового фронтенда
-app.mount("/frontend", NoCacheStaticFiles(directory="frontend"), name="frontend")
 app.mount("/images", NoCacheStaticFiles(directory="data/images"), name="images")
+app.mount("/", NoCacheStaticFiles(directory="frontend", html=True), name="frontend")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

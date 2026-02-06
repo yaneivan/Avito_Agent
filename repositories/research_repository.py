@@ -228,6 +228,7 @@ class AnalyzedLotRepository:
     def create(self, analyzed_lot: AnalyzedLot) -> AnalyzedLot:
         db_analyzed_lot = DBAnalyzedLot(
             raw_lot_id=analyzed_lot.raw_lot_id,
+            search_task_id=analyzed_lot.search_task_id, 
             schema_id=analyzed_lot.schema_id,
             structured_data=json.dumps(analyzed_lot.structured_data),
             relevance_note=analyzed_lot.relevance_note,
@@ -248,6 +249,7 @@ class AnalyzedLotRepository:
         return AnalyzedLot(
             id=db_lot.id,
             raw_lot_id=db_lot.raw_lot_id,
+            search_task_id=db_lot.search_task_id,  
             schema_id=db_lot.schema_id,
             structured_data=json.loads(db_lot.structured_data),
             relevance_note=db_lot.relevance_note,
@@ -255,6 +257,38 @@ class AnalyzedLotRepository:
             tournament_score=db_lot.tournament_score or 0.0,
             created_at=db_lot.created_at
         )
+    
+    
+    def get_by_task_id(self, task_id: int) -> List[AnalyzedLot]:
+        """Получение всех проанализированных лотов для конкретной таблицы"""
+        db_lots = self.db.query(DBAnalyzedLot).filter(DBAnalyzedLot.search_task_id == task_id).all()
+        
+        results = []
+        for db_lot in db_lots:
+            results.append(AnalyzedLot(
+                id=db_lot.id,
+                raw_lot_id=db_lot.raw_lot_id,
+                search_task_id=db_lot.search_task_id,
+                schema_id=db_lot.schema_id,
+                structured_data=json.loads(db_lot.structured_data),
+                relevance_note=db_lot.relevance_note,
+                image_description_and_notes=db_lot.image_description_and_notes,
+                tournament_score=db_lot.tournament_score or 0.0,
+                created_at=db_lot.created_at
+            ))
+        return results
+    
+
+    def update_score(self, lot_id: int, score: float):
+        """Обновление турнирного рейтинга лота"""
+        logger.info(f"Обновление рейтинга в БД для лота {lot_id}: {score}")
+        db_lot = self.db.query(DBAnalyzedLot).filter(DBAnalyzedLot.id == lot_id).first()
+        if db_lot:
+            db_lot.tournament_score = score
+            self.db.commit()
+            logger.info(f"Рейтинг лота {lot_id} успешно сохранен")
+        else:
+            logger.warning(f"Не удалось найти лот {lot_id} для обновления рейтинга")
 
 
 class SearchTaskRepository:

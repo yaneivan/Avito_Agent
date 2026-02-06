@@ -10,7 +10,7 @@
  * @returns {HTMLElement} - DOM элемент сообщения
  */
 function renderMessage(msg) {
-    console.log("Rendering message:", msg); // ПОСМОТРИ В КОНСОЛЬ БРАУЗЕРА
+    console.log("Rendering message:", msg);
 
     const templateId = msg.role === 'user' ? '#msg-user-tpl' : '#msg-bot-tpl';
     const template = document.querySelector(templateId);
@@ -18,12 +18,30 @@ function renderMessage(msg) {
     const messageElement = clone.querySelector('.message');
     const contentElement = clone.querySelector('.message-content');
 
-    // Рендерим текст (Markdown)
+    // 1. Рендерим текст (Markdown)
     if (msg.content) {
         contentElement.innerHTML = window.marked.parse(msg.content);
     }
 
-    // --- НОВОЕ: Рендерим плитки лотов ---
+    // --- ДОБАВЛЕНО: Кнопка таблицы сравнения ---
+    // Если это ответ бота и в нем есть ID задачи поиска
+    if (msg.role === 'assistant' && msg.task_id) {
+        const tableBtn = document.createElement('button');
+        tableBtn.className = 'view-table-btn';
+        tableBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px; vertical-align: middle;">
+                <path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/>
+            </svg>
+            Открыть таблицу сравнения
+        `;
+        tableBtn.onclick = () => {
+            window.open(`/table.html?task_id=${msg.task_id}`, '_blank');
+        };
+        // Добавляем кнопку в конец текстового контента
+        contentElement.appendChild(tableBtn);
+    }
+
+    // 2. Рендерим плитки лотов (уже было, сохраняем)
     if (msg.role === 'assistant' && msg.items && msg.items.length > 0) {
         const lotsContainer = clone.querySelector('.lots-container');
         const lotTemplate = document.querySelector('#lot-card-tpl');
@@ -35,36 +53,22 @@ function renderMessage(msg) {
             lotClone.querySelector('.lot-price').textContent = Utils.formatPrice(item.price);
             lotClone.querySelector('.lot-link').href = item.url;
             
-            // Обработка картинки (преобразуем системный путь в URL)
-            console.log('Processing item:', item); // Лог для отладки
+            // Обработка картинки
             if (item.image_path) {
-                console.log('Found image_path:', item.image_path); // Лог для отладки
-
-                // Преобразуем системный путь к изображению в URL, обслуживаемый FastAPI
                 let imgUrl = item.image_path;
 
-                // Если путь начинается с './data/images/', заменяем на '/images/' для FastAPI
+                // Унификация путей для FastAPI
                 if (imgUrl.startsWith('./data/images/')) {
                     imgUrl = imgUrl.replace('./data/images/', '/images/');
-                }
-                // Если путь начинается с 'data/images/', тоже заменяем на '/images/'
-                else if (imgUrl.startsWith('data/images/')) {
+                } else if (imgUrl.startsWith('data/images/')) {
                     imgUrl = imgUrl.replace('data/images/', '/images/');
-                }
-                // Если путь содержит 'data/images/' в любом месте, заменяем на '/images/'
-                else if (imgUrl.includes('data/images/')) {
+                } else if (imgUrl.includes('data/images/')) {
                     imgUrl = imgUrl.replace(/.*?data\/images\//, '/images/');
-                }
-                // Если путь уже является абсолютным URL, оставляем как есть
-                else if (!imgUrl.startsWith('/')) {
-                    // Если путь не начинается с '/', добавляем '/images/' в начало
+                } else if (!imgUrl.startsWith('/') && !imgUrl.startsWith('http')) {
                     imgUrl = '/images/' + imgUrl;
                 }
 
-                console.log('Converted imgUrl:', imgUrl); // Лог для отладки
                 lotClone.querySelector('.lot-image').src = imgUrl;
-            } else {
-                console.log('No image_path found for item'); // Лог для отладки
             }
 
             lotsContainer.appendChild(lotClone);

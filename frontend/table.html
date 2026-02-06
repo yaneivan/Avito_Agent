@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сравнение лотов — Avito Agent</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f5f7f9; color: #2d3436; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h1 { margin-bottom: 25px; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 15px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #edf2f7; text-align: left; }
+        
+        /* Стили заголовков с сортировкой */
+        th { 
+            cursor: pointer; 
+            background: #f8fafc; 
+            font-weight: 600; 
+            color: #4a5568; 
+            user-select: none; 
+            position: relative;
+            transition: background 0.2s;
+        }
+        th:hover { background: #edf2f7; }
+        th::after { content: '↕'; position: absolute; right: 8px; opacity: 0.3; }
+        th.sort-asc::after { content: '↑'; opacity: 1; color: #00aff0; }
+        th.sort-desc::after { content: '↓'; opacity: 1; color: #00aff0; }
+
+        tr:hover { background-color: #f9fbff; }
+        
+        .price-cell { font-weight: bold; color: #2c3e50; white-space: nowrap; }
+        .score-cell { font-weight: bold; color: #00aff0; text-align: center; }
+        .lot-link { color: #00aff0; text-decoration: none; }
+        .lot-link:hover { text-decoration: underline; }
+        
+        .loading { text-align: center; padding: 40px; font-size: 1.2rem; color: #a0aec0; }
+
+        /* Контейнер для фото и тултипа */
+.thumbnail-container {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+}
+
+.thumb-img {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+}
+
+/* Тултип с описанием изображения */
+.tooltip-content {
+    visibility: hidden;
+    width: 250px;
+    background-color: #2d3436;
+    color: #fff;
+    text-align: left;
+    border-radius: 8px;
+    padding: 12px;
+    position: absolute;
+    z-index: 100;
+    bottom: 125%; /* Над картинкой */
+    left: 50%;
+    margin-left: -125px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    pointer-events: none;
+}
+
+.tooltip-content::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #2d3436 transparent transparent transparent;
+}
+
+.thumbnail-container:hover .tooltip-content {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Сворачиваемый блок для Relevance Note */
+details.relevance-details {
+    font-size: 0.9rem;
+    color: #4a5568;
+    max-width: 300px;
+}
+
+details.relevance-details summary {
+    cursor: pointer;
+    list-style: none; /* Убираем стандартную стрелку в некоторых браузерах */
+    color: #00aff0;
+    font-weight: 600;
+    outline: none;
+}
+
+details.relevance-details summary::-webkit-details-marker {
+    display: none; /* Убираем стрелку в Chrome */
+}
+
+details.relevance-details summary::before {
+    content: "▶ ";
+    display: inline-block;
+    transition: transform 0.2s;
+    font-size: 0.7rem;
+}
+
+details[open].relevance-details summary::before {
+    transform: rotate(90deg);
+}
+
+.relevance-text {
+    margin-top: 8px;
+    padding: 8px;
+    background: #f1f5f9;
+    border-radius: 4px;
+    border-left: 3px solid #00aff0;
+}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="table-title">Загрузка исследования...</h1>
+        <div id="table-wrapper">
+            <div class="loading">Получение данных от сервера...</div>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const taskId = urlParams.get('task_id');
+
+        /**
+         * Загрузка данных и отрисовка таблицы
+         */
+        async function loadTable() {
+            if (!taskId) {
+                document.getElementById('table-wrapper').innerHTML = '<div class="loading">ID задачи не указан</div>';
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/search_task/${taskId}/results`);
+                if (!response.ok) throw new Error('Ошибка сервера');
+                
+                const data = await response.json();
+                document.getElementById('table-title').textContent = data.topic || 'Результаты исследования';
+
+                if (data.rows.length === 0) {
+                    document.getElementById('table-wrapper').innerHTML = '<div class="loading">Нет проанализированных данных для этой задачи</div>';
+                    return;
+                }
+
+                renderTable(data);
+            } catch (error) {
+                console.error('Error loading table:', error);
+                document.getElementById('table-wrapper').innerHTML = '<div class="loading">Ошибка при загрузке данных</div>';
+            }
+        }
+
+        /**
+         * Генерация HTML таблицы
+         */
+        function renderTable(data) {
+            let html = `<table id="research-table">
+                <thead>
+                    <tr>
+                        <th>Фото</th>
+                        <th data-type="text">Товар</th>
+                        <th data-type="number">Цена</th>`;
+            
+            const schemaKeys = Object.keys(data.schema);
+            schemaKeys.forEach(key => {
+                const label = data.schema[key].description || key;
+                html += `<th data-type="auto">${label}</th>`;
+            });
+
+            html += `<th>Заметки</th>`; // ПЕРЕИМЕНОВАНО: было "Анализ"
+            html += `<th data-type="number" class="score-cell">Рейтинг</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            data.rows.forEach(row => {
+                // УЛУЧШЕННАЯ ЛОГИКА ПУТИ:
+                // Берем только имя файла из любого пути (win/linux) и добавляем наш роут /images/
+                let imgUrl = '';
+                if (row.image_path) {
+                    const fileName = row.image_path.split(/[\\/]/).pop(); 
+                    imgUrl = `/images/${fileName}`;
+                } else {
+                    imgUrl = 'https://via.placeholder.com/60?text=No+Photo';
+                }
+
+                html += `<tr>
+                    <!-- Фото с тултипом -->
+                    <td>
+                        <div class="thumbnail-container">
+                            <img src="${imgUrl}" class="thumb-img" onerror="this.src='https://via.placeholder.com/60?text=Error'">
+                            <div class="tooltip-content">
+                                <strong>Визуальный анализ:</strong><br>
+                                ${row.image_description || 'Нет данных для анализа фото'}
+                            </div>
+                        </div>
+                    </td>
+
+                    <td><a href="${row.url}" class="lot-link" target="_blank">${row.title}</a></td>
+                    
+                    <td class="price-cell" data-value="${cleanNumber(row.price)}">${row.price}</td>`;
+                
+                // Динамические данные из схемы
+                schemaKeys.forEach(key => {
+                    const val = row.structured_data ? row.structured_data[key] : null;
+                    const displayVal = (val === true) ? 'Да' : (val === false) ? 'Нет' : (val || '-');
+                    html += `<td>${displayVal}</td>`;
+                });
+
+                // Сворачиваемый блок Заметки
+                html += `
+                    <td>
+                        <details class="relevance-details">
+                            <summary>Заметки ИИ</summary>
+                            <div class="relevance-text">${row.relevance_note || 'Нет примечаний'}</div>
+                        </details>
+                    </td>`;
+                
+                html += `<td class="score-cell">${row.score ? row.score.toFixed(1) : '0.0'}</td>
+                </tr>`;
+            });
+
+            html += `</tbody></table>`;
+            document.getElementById('table-wrapper').innerHTML = html;
+            
+            makeTableSortable(document.getElementById('research-table'));
+        }
+        /**
+         * Очистка строки от мусора для превращения в число (для цен и рейтингов)
+         */
+        function cleanNumber(val) {
+            if (typeof val === 'number') return val;
+            const cleaned = String(val).replace(/[^\d.,]/g, '').replace(',', '.');
+            return parseFloat(cleaned) || 0;
+        }
+
+        /**
+         * Логика сортировки
+         */
+        function makeTableSortable(table) {
+            const headers = table.querySelectorAll('th');
+            const tbody = table.querySelector('tbody');
+
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    const type = header.getAttribute('data-type');
+                    const isAscending = header.classList.contains('sort-asc');
+                    
+                    // Сброс иконок у всех заголовков
+                    headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+                    
+                    rows.sort((rowA, rowB) => {
+                        let cellA = rowA.children[index].innerText.trim();
+                        let cellB = rowB.children[index].innerText.trim();
+
+                        // Если есть data-value (для цен), берем его
+                        const valA = rowA.children[index].getAttribute('data-value') || cellA;
+                        const valB = rowB.children[index].getAttribute('data-value') || cellB;
+
+                        // Определяем, как сравнивать (числа или текст)
+                        const numA = cleanNumber(valA);
+                        const numB = cleanNumber(valB);
+
+                        if (!isNaN(numA) && !isNaN(numB) && (type === 'number' || !isNaN(parseFloat(cellA)))) {
+                            return isAscending ? numB - numA : numA - numB;
+                        }
+
+                        return isAscending 
+                            ? cellB.localeCompare(cellA, 'ru') 
+                            : cellA.localeCompare(cellB, 'ru');
+                    });
+
+                    // Переключаем классы направления
+                    header.classList.add(isAscending ? 'sort-desc' : 'sort-asc');
+
+                    // Перерисовываем строки
+                    rows.forEach(row => tbody.appendChild(row));
+                });
+            });
+        }
+
+        loadTable();
+    </script>
+</body>
+</html>

@@ -67,7 +67,8 @@ class DeepSearchService:
                 # Анализируем каждый лот с помощью LLM и схемы
                 for i, raw_lot in enumerate(raw_lots):
                     logger.info(f"LLM обрабатывает лот номер {i} из {len(raw_lots)}")
-                    analyzed_lot = self._analyze_lot_with_schema(raw_lot, schema)
+                    analyzed_lot = self._analyze_lot_with_schema(raw_lot, schema, task_id)
+                    analyzed_lot.search_task_id = task_id 
                     saved_analyzed_lot = self.analyzed_lot_repo.create(analyzed_lot)
                     analyzed_lots.append(saved_analyzed_lot)
 
@@ -111,7 +112,8 @@ class DeepSearchService:
                 id=str(uuid.uuid4()), 
                 role="assistant", 
                 content=result_message,
-                items=items_for_tiles
+                items=items_for_tiles, 
+                task_id=task_id  
                 )
         )
 
@@ -122,26 +124,42 @@ class DeepSearchService:
         logger.info(f"Результаты глубокого поиска обработаны и сохранены для исследования {task.market_research_id}")
         return market_research
 
-    def _analyze_lot_with_schema(self, raw_lot: RawLot, schema: Schema) -> AnalyzedLot:
+    def _analyze_lot_with_schema(self, raw_lot: RawLot, schema: Schema, task_id: int) -> AnalyzedLot:
         """Анализ лота с использованием схемы и LLM"""
         logger.info(f"Анализируем лот {raw_lot.id} с использованием схемы {schema.id}")
 
         from utils.llm_client import get_completion
 
 
-        # Формируем читаемые инструкции из плоской схемы
-        fields_desc = "\n".join([f"- {k}: {v['description']} (тип: {v['type']})" for k, v in schema.json_schema.items()])
+        # Формируем читаемые инструкции безопасно
+        fields_list = []
+        for k, v in schema.json_schema.items():
+            if isinstance(v, dict):
+                # Если это словарь, берем значения через .get() с дефолтами
+                desc = v.get('description', 'Нет описания')
+                field_type = v.get('type', 'string')
+                fields_list.append(f"- {k}: {desc} (тип: {field_type})")
+            else:
+                # На случай, если LLM прислала просто "field": "string"
+                fields_list.append(f"- {k}: (тип: {v})")
+
+        fields_desc = "\n".join(fields_list)
 
         messages = [
             {
                 "role": "system",
                 "content": f"""Извлеки характеристики товара в формате JSON.
-        Поля для извлечения:
-        {fields_desc}
-        - relevance_note: почему этот лот подходит пользователю.
-        - image_description_and_notes: что изображено, видно на фото (объект, цвета, детали, состояние).
 
-        Возвращай СТРОГО чистый JSON."""
+### **ВАЖНЫЕ ПРАВИЛА**
+1. Если в объявлении предлагается несколько разных моделей (или товаров) в одном тексте, обязательно запиши это в relevance_note. Укажи, что в таком случае, цена указанная в объявлении может не являться реальной ценой.  
+
+Поля для извлечения:
+{fields_desc}
+- relevance_note: почему этот лот подходит пользователю.
+- image_description_and_notes: что изображено, видно на фото (объект, цвета, детали, состояние).
+
+
+Возвращай СТРОГО чистый JSON."""
                     },]
         user_content = [{"type": "text", "text": f"Title: {raw_lot.title}\nDesc: {raw_lot.description}\nPrice: {raw_lot.price}"}]
         
@@ -176,6 +194,7 @@ class DeepSearchService:
 
         analyzed_lot = AnalyzedLot(
             raw_lot_id=raw_lot.id,
+            search_task_id=task_id,  
             schema_id=schema.id,
             structured_data=structured_data,
             relevance_note=relevance_note,
@@ -227,10 +246,12 @@ class DeepSearchService:
             ranked_lots = []
             
             for item in ranked_result_data:
-                lot_id = item['id']
+                lot_id = int(item['id'])
                 if lot_id in id_to_lot_map:
                     lot = id_to_lot_map[lot_id]
-                    lot.tournament_score = item.get('tournament_score', 0)
+                    score = float(item.get('tournament_score', 0))
+                    lot.tournament_score = score
+                    self.analyzed_lot_repo.update_score(lot.id, score)
                     ranked_lots.append(lot)
 
             # 6. Добавляем лоты, которые могли не попасть в турнир (safety first)

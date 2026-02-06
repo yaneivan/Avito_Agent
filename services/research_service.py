@@ -179,3 +179,10 @@ class MarketResearchService:
     def get_market_research(self, mr_id: int) -> MarketResearch:
         """Получение исследования по ID"""
         return self.mr_repo.get_by_id(mr_id)
+    
+    def update_score(self, lot_id: int, score: float):
+        """Обновление турнирного рейтинга лота"""
+        db_lot = self.db.query(DBAnalyzedLot).filter(DBAnalyzedLot.id == lot_id).first()
+        if db_lot:
+            db_lot.tournament_score = score
+            self.db.commit()

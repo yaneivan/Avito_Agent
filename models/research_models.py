@@ -18,6 +18,7 @@ class ChatMessage(BaseModel):
     timestamp: datetime = datetime.now()
     images: Optional[List[str]] = []  # Base64 encoded images
     items: Optional[List[dict]] = []  
+    task_id: Optional[int] = None  
 
 
 class Schema(BaseModel):
@@ -40,6 +41,7 @@ class RawLot(BaseModel):
 class AnalyzedLot(BaseModel):
     id: Optional[int] = None
     raw_lot_id: int
+    search_task_id: int  
     schema_id: int
     structured_data: dict
     relevance_note: str

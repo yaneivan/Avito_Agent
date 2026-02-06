@@ -292,3 +292,27 @@ main {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+
+.view-table-btn {
+    margin-top: 15px;
+    display: inline-flex;
+    align-items: center;
+    background-color: #00aff0; /* Цвет Авито или синий */
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.view-table-btn:hover {
+    background-color: #0088cc;
+}
+
+.view-table-btn svg {
+    flex-shrink: 0;
+}

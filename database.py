@@ -52,6 +52,7 @@ class DBAnalyzedLot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     raw_lot_id = Column(Integer, ForeignKey("raw_lots.id"))
+    search_task_id = Column(Integer)
     schema_id = Column(Integer, ForeignKey("schemas.id"))
     structured_data = Column(Text)
     relevance_note = Column(Text)
