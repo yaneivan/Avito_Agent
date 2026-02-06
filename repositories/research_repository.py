@@ -165,6 +165,28 @@ class MarketResearchRepository:
                 "state": mr.state
             })
         return summaries
+    
+    def delete(self, mr_id: int) -> bool:
+        db_mr = self.db.query(DBMarketResearch).filter(DBMarketResearch.id == mr_id).first()
+        if not db_mr:
+            return False
+
+        # 1. Находим все задачи этого исследования
+        tasks = self.db.query(DBSearchTask).filter(DBSearchTask.market_research_id == mr_id).all()
+        task_ids = [t.id for t in tasks]
+
+        # 2. Удаляем результаты анализа, связанные с этими задачами
+        if task_ids:
+            self.db.query(DBAnalyzedLot).filter(DBAnalyzedLot.search_task_id.in_(task_ids)).delete(synchronize_session=False)
+
+        # 3. Удаляем задачи
+        self.db.query(DBSearchTask).filter(DBSearchTask.market_research_id == mr_id).delete(synchronize_session=False)
+
+        # 4. Удаляем само исследование
+        self.db.delete(db_mr)
+        
+        self.db.commit()
+        return True
 
 
 class SchemaRepository:

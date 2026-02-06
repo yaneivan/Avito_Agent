@@ -201,6 +201,13 @@ async function getHistoryList() {
     return await response.json();
 }
 
+async function deleteResearch(id) {
+    const response = await fetch(`${API_BASE_URL}/market_research/${id}`, {
+        method: 'DELETE'
+    });
+    return await response.json();
+}
+
 // Создаем глобальный экземпляр
 window.ResearchPoller = new ResearchPoller();
 
@@ -209,5 +216,6 @@ window.Api = {
     startNewResearch,
     sendChatMessage,
     getMarketResearch, 
-    getHistoryList
+    getHistoryList, 
+    deleteResearch 
 };

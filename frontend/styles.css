@@ -1,4 +1,6 @@
-/* Основные стили для Avito Agent */
+/* ==========================================================================
+   ОБЩИЕ СТИЛИ И СЕТКА
+   ========================================================================== */
 * {
     margin: 0;
     padding: 0;
@@ -6,407 +8,337 @@
 }
 
 body {
-    font-family: 'Inter', 'Roboto', sans-serif;
-    background-color: #f5f5f5;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: #f3f4f6;
     height: 100vh;
     display: flex;
     flex-direction: column;
+    color: #1f2937;
+    overflow: hidden; /* Чтобы прокручивался только чат */
 }
 
-/* Header стили */
+/* ==========================================================================
+   ШАПКА (HEADER) - Идеальная центровка
+   ========================================================================== */
 header {
     background-color: white;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    padding: 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 20px;
     z-index: 100;
 }
 
 .header-content {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
 }
 
-header h1 {
-    color: #333;
-    font-size: 1.5rem;
+.header-left { display: flex; justify-content: flex-start; }
+.header-right { display: flex; justify-content: flex-end; }
+
+.header-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
-#status-indicator {
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    font-weight: bold;
+.header-center h1 {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: #111827;
+    letter-spacing: -0.025em;
 }
 
-/* Базовый стиль индикатора */
+/* Статус */
 #status-indicator {
-    padding: 4px 12px;
+    margin-top: 4px;
+    padding: 2px 10px;
     border-radius: 20px;
-    font-size: 0.85rem;
-    font-weight: 600;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
     transition: all 0.3s ease;
-    display: inline-block;
 }
 
-/* Состояние: Готов / Ожидание */
-.status-ready {
-    background-color: #d4edda;
-    color: #155724;
-    border: 1px solid #c3e6cb;
+.status-ready { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.status-searching { 
+    background-color: #fffbeb; color: #d97706; border: 1px solid #fde68a; 
+    animation: pulse-opacity 1.5s infinite;
 }
 
-/* Состояние: Активный поиск */
-.status-searching {
-    background-color: #fff3cd;
-    color: #856404;
-    border: 1px solid #ffeeba;
-    animation: pulse 1.5s infinite;
-}
+@keyframes pulse-opacity { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
-/* Анимация пульсации */
-@keyframes pulse {
-    0% {
-        transform: scale(1);
-        opacity: 1;
-    }
-    50% {
-        transform: scale(1.05);
-        opacity: 0.8;
-    }
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
-}
-
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.7; }
-    100% { opacity: 1; }
-}
-
-#new-search-btn {
-    padding: 0.5rem 1rem;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 4px;
+/* Кнопки в шапке */
+#history-btn, #new-search-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.85rem;
     cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid #d1d5db;
 }
 
-#new-search-btn:hover {
-    background-color: #0056b3;
-}
+#history-btn { background-color: white; color: #374151; }
+#history-btn:hover { background-color: #f9fafb; border-color: #9ca3af; }
 
-/* Main стили */
+#new-search-btn { background-color: #00aff0; color: white; border: none; }
+#new-search-btn:hover { background-color: #008ecc; transform: translateY(-1px); }
+
+/* ==========================================================================
+   ОСНОВНАЯ ОБЛАСТЬ (ЧАТ)
+   ========================================================================== */
 main {
     flex: 1;
     display: flex;
     flex-direction: column;
-    max-width: 1200px;
+    max-width: 1000px;
     width: 100%;
     margin: 0 auto;
-    padding: 1rem;
+    padding: 0 20px;
+    overflow-x: hidden; /* Запрещаем выезд вбок на уровне главного блока */
+    position: relative;
+    z-index: 10;
 }
 
-/* Контейнер чата */
 #chat-container {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem 0;
+    overflow-x: hidden; /* Запрещаем выезд вбок внутри чата */
+    padding: 20px 0;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 20px;
 }
+
+/* Скроллбар для Chrome/Safari */
+#chat-container::-webkit-scrollbar { width: 6px; }
+#chat-container::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
 
 /* Сообщения */
 .message {
-    max-width: 80%;
-    padding: 1rem;
-    border-radius: 8px;
+    max-width: 85%;
+    padding: 14px 18px;
+    border-radius: 16px;
+    line-height: 1.6;
+    font-size: 0.95rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    
+    /* ИСПРАВЛЕНИЕ ПЕРЕНОСОВ: */
+    word-wrap: break-word;       /* Старая поддержка */
+    overflow-wrap: anywhere;    /* Современный стандарт: рвет строку везде, где надо */
+    word-break: normal;
     position: relative;
-    word-wrap: break-word;
-    line-height: 1.5;
 }
+
+/* Дополнительная защита для контента внутри */
+.message-content {
+    width: 100%;
+    overflow-wrap: anywhere;
+}
+
 
 .message-user {
     align-self: flex-end;
-    background-color: #007bff;
+    background-color: #00aff0;
     color: white;
+    border-bottom-right-radius: 4px;
 }
 
 .message-bot {
     align-self: flex-start;
     background-color: white;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    color: #333;
+    color: #374151;
+    border-bottom-left-radius: 4px;
+    border: 1px solid #e5e7eb;
 }
 
-/* Стили для контента сообщения */
-.message-content {
-    margin-bottom: 0.5rem;
+/* Рендеринг Markdown внутри сообщений */
+.message-content p { margin-bottom: 10px; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content strong { color: #111827; }
+
+/* Кнопка таблицы внутри сообщения бота */
+.view-table-btn {
+    margin-top: 12px;
+    display: inline-flex;
+    align-items: center;
+    background-color: #f3f4f6;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.2s;
 }
 
-.message-content img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 4px;
-    margin-top: 0.5rem;
-}
+.view-table-btn:hover { background-color: #e5e7eb; border-color: #9ca3af; }
 
-/* Контейнер для карточек товаров */
+/* ==========================================================================
+   КАРТОЧКИ ТОВАРОВ (ПЛИТКА)
+   ========================================================================== */
 .lots-container {
-    margin-top: 1rem;
+    margin-top: 15px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
 }
 
-/* Карточка товара */
 .lot-card {
     background: white;
-    border-radius: 8px;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
 }
 
-.lot-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
+.lot-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
 
 .lot-image {
     width: 100%;
-    height: 150px;
+    height: 130px;
     object-fit: cover;
-    display: block;
+    background-color: #f3f4f6;
 }
 
-.lot-info {
-    padding: 1rem;
-}
+.lot-info { padding: 10px; flex: 1; display: flex; flex-direction: column; }
 
 .lot-title {
-    font-weight: bold;
-    margin-bottom: 0.5rem;
-    font-size: 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    height: 2.5em;
+    overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
-    overflow: hidden;
 }
 
-.lot-price {
-    color: #28a745;
-    font-size: 1.2rem;
-    font-weight: bold;
-    margin-bottom: 0.5rem;
-}
+.lot-price { color: #10b981; font-weight: 800; font-size: 1rem; margin-bottom: 8px; }
 
 .lot-link {
-    display: inline-block;
-    color: #007bff;
+    font-size: 0.75rem;
+    color: #00aff0;
     text-decoration: none;
-    font-size: 0.9rem;
+    font-weight: 600;
+    margin-top: auto;
 }
 
-.lot-link:hover {
-    text-decoration: underline;
-}
-
-/* Область ввода */
+/* ==========================================================================
+   ОБЛАСТЬ ВВОДА (INPUT AREA)
+   ========================================================================== */
 #input-area {
+    padding: 20px 0;
+    background-color: #f3f4f6;
     display: flex;
-    gap: 0.5rem;
-    padding-top: 1rem;
-    background-color: white;
-    border-top: 1px solid #eee;
+    gap: 12px;
+    align-items: flex-end;
 }
 
 #message-input {
     flex: 1;
-    padding: 0.75rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    resize: vertical;
-    min-height: 80px;
+    padding: 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    resize: none;
+    font-family: inherit;
+    font-size: 0.95rem;
+    max-height: 150px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    outline: none;
 }
+
+#message-input:focus { border-color: #00aff0; box-shadow: 0 0 0 3px rgba(0, 175, 240, 0.1); }
 
 #send-btn {
-    padding: 0.75rem 1.5rem;
-    background-color: #28a745;
+    background-color: #10b981;
     color: white;
+    padding: 12px 24px;
+    border-radius: 12px;
     border: none;
-    border-radius: 4px;
+    font-weight: 700;
     cursor: pointer;
-    align-self: flex-start;
+    transition: all 0.2s;
+    height: 48px;
 }
 
-#send-btn:hover {
-    background-color: #218838;
-}
+#send-btn:hover { background-color: #059669; transform: scale(1.02); }
+#send-btn:disabled { background-color: #9ca3af; cursor: not-allowed; transform: none; }
 
-#send-btn:disabled {
-    background-color: #6c757d;
-    cursor: not-allowed;
-}
-
-/* Адаптивность */
-@media (max-width: 768px) {
-    .header-content {
-        flex-direction: column;
-        gap: 1rem;
-    }
-    
-    .message {
-        max-width: 90%;
-    }
-    
-    #input-area {
-        flex-direction: column;
-    }
-    
-    #send-btn {
-        align-self: stretch;
-    }
-    
-    .lots-container {
-        grid-template-columns: 1fr;
-    }
-}
-
-/* Спиннер при ожидании */
-.spinner {
-    display: inline-block;
-    width: 20px;
-    height: 20px;
-    border: 3px solid rgba(255,255,255,.3);
-    border-radius: 50%;
-    border-top-color: #fff;
-    animation: spin 1s ease-in-out infinite;
-}
-
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-
-.view-table-btn {
-    margin-top: 15px;
-    display: inline-flex;
-    align-items: center;
-    background-color: #00aff0; /* Цвет Авито или синий */
-    color: white;
-    border: none;
-    padding: 10px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 14px;
-    transition: background-color 0.2s;
-}
-
-.view-table-btn:hover {
-    background-color: #0088cc;
-}
-
-.view-table-btn svg {
-    flex-shrink: 0;
-}
-
+/* ==========================================================================
+   ИСТОРИЯ (SIDEBAR)
+   ========================================================================== */
 .sidebar {
     position: fixed;
-    right: -350px; /* Скрыт по умолчанию */
+    right: -350px;
     top: 0;
     width: 350px;
     height: 100%;
     background: white;
-    box-shadow: -2px 0 5px rgba(0,0,0,0.1);
-    transition: 0.3s;
+    box-shadow: -10px 0 30px rgba(0,0,0,0.1);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1000;
     display: flex;
     flex-direction: column;
 }
-.sidebar.active { right: 0; }
+
+.sidebar.active { transform: translateX(-350px); }
+
 #overlay {
     display: none;
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.5); z-index: 999;
-}
-.sidebar-header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-#history-list { flex: 1; overflow-y: auto; padding: 10px; }
-.history-item {
-    padding: 15px;
-    border-bottom: 1px solid #f0f0f0;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.history-item:hover { background: #f9f9f9; }
-.history-item .date { font-size: 0.8rem; color: #999; }
-.history-item .title { font-weight: bold; display: block; margin-bottom: 5px; }
-
-/* Общий стиль для кнопок в хедере */
-#history-btn, #new-search-btn {
-    background-color: #f2f4f7; /* Светло-серый фон */
-    color: #2d3436;
-    border: 1px solid #d1d5db;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-size: 0.9rem;
-    margin-left: 10px; /* Отступ между кнопками */
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(2px);
+    z-index: 999;
 }
 
-/* Эффект при наведении */
-#history-btn:hover, #new-search-btn:hover {
-    background-color: #e5e7eb;
-    border-color: #9ca3af;
-}
-
-/* Можно выделить кнопку "Новый поиск" синим, а историю оставить серой */
-#new-search-btn {
-    background-color: #00aff0;
-    color: white;
-    border: none;
-}
-
-#new-search-btn:hover {
-    background-color: #008ecc;
-}
-
-/* Стили для элементов истории внутри сайдбара, чтобы они выглядели современно */
-.history-item {
-    padding: 12px 16px;
-    margin: 8px;
-    border-radius: 10px;
-    border: 1px solid #eee;
-    background: #fff;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+.sidebar-header {
+    padding: 24px 20px;
+    border-bottom: 1px solid #f3f4f6;
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    justify-content: space-between;
+    align-items: center;
 }
 
-.history-item:hover {
-    border-color: #00aff0;
-    background-color: #f0f9ff;
+#history-list { flex: 1; overflow-y: auto; padding: 12px; }
+
+.history-item {
+    padding: 14px;
+    margin-bottom: 10px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
 }
 
-.history-item .title {
-    color: #1f2937;
-    font-size: 0.95rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+.history-item:hover { border-color: #00aff0; background: #f0f9ff; }
+
+.history-info { flex: 1; min-width: 0; }
+.history-info .title { 
+    font-weight: 600; font-size: 0.85rem; display: block; 
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+}
+.history-info .date { font-size: 0.75rem; color: #6b7280; }
+
+.delete-btn {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    background: #fee2e2; color: #ef4444; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
 }
 
-.history-item .date {
-    color: #6b7280;
-    font-size: 0.8rem;
+.delete-btn:hover { background: #ef4444; color: white; }
+
+#close-history {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid #d1d5db;
+    background: #f3f4f6; cursor: pointer;
 }

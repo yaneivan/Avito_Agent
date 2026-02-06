@@ -5,44 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Avito Agent</title>
     <link rel="stylesheet" href="styles.css">
-    <!-- Подключение marked.js через CDN -->
+    <!-- Подключение marked.js для Markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <header>
         <div class="header-content">
-            <h1>Avito Agent</h1>
-            <span id="status-indicator">Готов</span>
-            <button id="new-search-btn">Новый поиск</button>
-        </div>
-
-        <!-- В хедер рядом с кнопкой "Новый поиск" -->
-        <button id="history-btn">История</button>
-
-        <!-- После <main> добавьте сайдбар -->
-        <div id="history-sidebar" class="sidebar">
-            <div class="sidebar-header">
-                <h2>История поисков</h2>
-                <button id="close-history">&times;</button>
+            <div class="header-left">
+                <button id="history-btn">История</button>
             </div>
-            <div id="history-list">
-                <!-- Сюда будут грузиться чаты -->
+            
+            <div class="header-center">
+                <h1>Avito Agent</h1>
+                <span id="status-indicator" class="status-ready">Готов</span>
+            </div>
+            
+            <div class="header-right">
+                <button id="new-search-btn">Новый поиск</button>
             </div>
         </div>
-        <!-- Затемнение фона -->
-        <div id="overlay"></div>
     </header>
 
     <main>
         <div id="chat-container"></div>
         
         <div id="input-area">
-            <textarea id="message-input" placeholder="Введите ваш запрос..." rows="3"></textarea>
+            <textarea id="message-input" placeholder="Введите ваш запрос..." rows="1"></textarea>
             <button id="send-btn">Отправить</button>
         </div>
     </main>
 
-    <!-- Шаблоны для сообщений и карточек товаров -->
+    <!-- ИСТОРИЯ (Сайдбар) -->
+    <div id="overlay"></div>
+    <div id="history-sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h2>История поисков</h2>
+            <button id="close-history">&times;</button>
+        </div>
+        <div id="history-list">
+            <!-- Сюда JS будет вставлять историю -->
+        </div>
+    </div>
+
+    <!-- ШАБЛОНЫ (Templates) -->
     <template id="msg-user-tpl">
         <div class="message message-user">
             <div class="message-content"></div>
@@ -62,11 +67,12 @@
             <div class="lot-info">
                 <h3 class="lot-title"></h3>
                 <p class="lot-price"></p>
-                <a class="lot-link" href="#" target="_blank">Смотреть на Avito</a>
+                <a class="lot-link" href="#" target="_blank">Смотреть</a>
             </div>
         </div>
     </template>
 
+    <!-- СКРИПТЫ -->
     <script src="js/utils.js"></script>
     <script src="js/api.js"></script>
     <script src="js/render.js"></script>

@@ -202,3 +202,12 @@ async def get_task_results(task_id: int, db: Session = Depends(get_db)):
 async def get_all_researches(db: Session = Depends(get_db)):
     repo = MarketResearchRepository(db)
     return repo.get_all_summaries()
+
+
+@router.delete("/market_research/{mr_id}")
+async def delete_market_research(mr_id: int, db: Session = Depends(get_db)):
+    repo = MarketResearchRepository(db)
+    success = repo.delete(mr_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Research not found")
+    return {"status": "deleted"}

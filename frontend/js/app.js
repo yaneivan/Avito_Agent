@@ -202,11 +202,36 @@ document.getElementById('history-btn').onclick = async () => {
         const div = document.createElement('div');
         div.className = 'history-item';
         const date = new Date(item.updated_at).toLocaleDateString();
+        
         div.innerHTML = `
-            <span class="title">${item.title}</span>
-            <span class="date">${date} | Статус: ${item.state}</span>
+            <div class="history-info">
+                <span class="title">${item.title}</span>
+                <span class="date">${date} | ${item.state}</span>
+            </div>
+            <button class="delete-btn" title="Удалить">&times;</button>
         `;
+
+        // Клик по самому элементу — загружаем чат
         div.onclick = () => loadResearch(item.id);
+
+        // Клик по кнопке удаления
+        const delBtn = div.querySelector('.delete-btn');
+        delBtn.onclick = async (e) => {
+            e.stopPropagation(); // ВАЖНО: чтобы не сработал loadResearch
+            
+            if (confirm('Вы уверены, что хотите удалить этот поиск?')) {
+                await Api.deleteResearch(item.id);
+                
+                // Если мы удаляем тот чат, который сейчас открыт — очищаем экран
+                if (state.mr_id === item.id) {
+                    handleNewSearch();
+                }
+                
+                // Просто симулируем повторный клик на кнопку истории, чтобы обновить список
+                document.getElementById('history-btn').click();
+            }
+        };
+
         container.appendChild(div);
     });
     
