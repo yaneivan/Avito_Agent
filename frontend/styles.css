@@ -342,3 +342,180 @@ main {
     width: 32px; height: 32px; border-radius: 8px; border: 1px solid #d1d5db;
     background: #f3f4f6; cursor: pointer;
 }
+
+
+/* Контейнер теперь не ограничивает таблицу жестко */
+.container { 
+    max-width: 95%; /* Даем больше пространства на широких экранах */
+    margin: 20px auto; 
+    background: white; 
+    padding: 20px; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+/* ОБЯЗАТЕЛЬНО: Обертка для прокрутки */
+#table-wrapper {
+    width: 100%;
+    overflow-x: auto; /* Включает горизонтальную прокрутку */
+    margin-top: 20px;
+    border: 1px solid #edf2f7;
+    border-radius: 8px;
+}
+
+table {
+    min-width: 1200px; /* Фиксируем минимальную ширину, чтобы колонки не слипались */
+    table-layout: fixed; /* Помогает браузеру соблюдать ширину колонок */
+}
+
+th, td { 
+    padding: 12px 10px; 
+    font-size: 0.9rem; 
+    vertical-align: middle; /* Чтобы текст был по центру высоты */
+}
+
+/* Фиксируем заголовки, чтобы они не переносились слишком криво */
+th {
+    white-space: nowrap; 
+    background: #f8fafc;
+    position: sticky;
+    top: 0; /* Опционально: фиксация заголовка при вертикальном скролле */
+}
+
+/* Ограничение колонки с названием */
+.title-cell {
+    width: 250px; /* Фиксируем ширину */
+}
+
+.title-link {
+    display: block;
+    color: #00aff0;
+    text-decoration: none;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3; /* Максимум 3 строки */
+    -webkit-box-orient: vertical;
+}
+
+
+/* Заметки ИИ (Details) - чтобы не расширяли ячейку */
+.relevance-details {
+    width: 150px;
+}
+
+/* 1. Настройки страницы: разрешаем скролл вниз */
+body { 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+    padding: 0; 
+    margin: 0;
+    background-color: #f5f7f9; 
+    color: #2d3436; 
+    /* Убираем ограничения по высоте, чтобы страница листалась вниз */
+    height: auto !important; 
+    min-height: 100vh;
+    overflow-y: auto !important; 
+}
+
+/* 2. Контейнер: делаем его на всю ширину */
+.container { 
+    max-width: 98% !important; /* Почти на весь экран */
+    width: calc(100% - 40px);
+    margin: 20px auto; 
+    background: white; 
+    padding: 20px; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+h1 { 
+    margin-bottom: 25px; 
+    color: #2c3e50; 
+    border-bottom: 2px solid #eee; 
+    padding-bottom: 15px; 
+}
+
+/* 3. Обертка таблицы: только горизонтальный скролл */
+#table-wrapper {
+    width: 100%;
+    overflow-x: auto; /* Появится полоса прокрутки вправо, если колонок много */
+    overflow-y: hidden; /* Запрещаем внутренний вертикальный скролл, чтобы листалась вся страница */
+    border: 1px solid #edf2f7;
+    border-radius: 8px;
+    background: white;
+}
+
+/* 4. Сама таблица */
+table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    /* Убираем table-layout: fixed, чтобы колонки подстраивались под контент */
+    table-layout: auto !important; 
+}
+
+th, td { 
+    padding: 12px 15px; 
+    border-bottom: 1px solid #edf2f7; 
+    text-align: left; 
+    word-wrap: break-word;
+}
+
+/* Заголовки: не даем тексту внутри них переноситься, чтобы не было "лесенки" */
+th { 
+    background: #f8fafc; 
+    font-weight: 600; 
+    color: #4a5568; 
+    white-space: nowrap; /* Заголовки в одну строку */
+    cursor: pointer;
+    position: relative;
+}
+
+th:hover { background: #edf2f7; }
+
+/* 5. Настройка колонок */
+
+/* Колонка с названием */
+.title-cell {
+    min-width: 250px;
+    max-width: 400px;
+}
+
+.title-link {
+    color: #00aff0;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* Ограничиваем название 2 строками */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Колонка цены и рейтинга */
+.price-cell, .score-cell {
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+/* Заметки ИИ (Details) */
+.relevance-details {
+    min-width: 150px;
+}
+
+.relevance-text {
+    font-size: 0.85rem;
+    background: #f1f5f9;
+    padding: 10px;
+    border-radius: 6px;
+    margin-top: 5px;
+    border-left: 3px solid #00aff0;
+}
+
+/* Стили для миниатюр */
+.thumb-img {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 6px;
+}
