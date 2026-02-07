@@ -54,7 +54,7 @@ class QuickSearchService:
                 "price": saved_raw_lot.price,
                 "url": saved_raw_lot.url,
                 # Нормализуем путь: убираем ./ и меняем \ на /
-                "image_path": saved_raw_lot.image_path.replace("\\", "/").replace("./", ""),
+                "image_path": saved_raw_lot.image_path.replace("\\", "/").replace("./", "") if saved_raw_lot.image_path else None,
                 "saved_lot_id": saved_raw_lot.id
                 # image_base64 сюда НЕ пишем, чтобы не раздувать историю чата
             }
