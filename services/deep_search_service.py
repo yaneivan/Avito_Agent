@@ -199,69 +199,91 @@ class DeepSearchService:
 
         return analyzed_lot
 
-    def _apply_tournament_ranking(self, analyzed_lots: List[AnalyzedLot], schema: Schema) -> List[AnalyzedLot]:
-            """Применение турнирного реранкинга к результатам"""
-            logger.info(f"Применяем турнирный реранкинг к {len(analyzed_lots)} лотам")
+    def _apply_tournament_ranking(self, analyzed_lots: List[AnalyzedLot], schema: Schema, num_rounds: int = 4) -> List[AnalyzedLot]:
+        """Применение турнирного реранкинга к результатам с возможностью указания количества раундов"""
+        logger.info(f"Применяем турнирный реранкинг к {len(analyzed_lots)} лотам, {num_rounds} раундов")
 
-            # 1. Разбиваем лоты на группы по 5 штук с перекрытием в 1 элемент
-            groups = []
+        import random
+
+        # Подготовим все группы для сравнения
+        all_groups_data = []
+
+        # Определяем критерии
+        criteria = "Цена (сравнение стоимости), " + ", ".join(schema.json_schema.keys())
+        criteria += ". Также учитывай соотношение цены и характеристик (выгодность)."
+
+        # Подготовим группы для каждого раунда
+        for round_num in range(num_rounds):
+            # Создаем копию списка и перемешиваем (для первого раунда можно использовать оригинальный порядок)
+            if round_num == 0:
+                current_lots = analyzed_lots
+            else:
+                current_lots = analyzed_lots.copy()
+                random.shuffle(current_lots)
+            
             group_size = 5
-            overlap = 1
-
-            for i in range(0, len(analyzed_lots), group_size - overlap):
-                group = analyzed_lots[i:i + group_size]
+            step = group_size  # Без перекрытия
+            
+            # Разбиваем на группы
+            groups = []
+            for i in range(0, len(current_lots), step):
+                group = current_lots[i:i + group_size]
                 if len(group) >= 2:
                     groups.append(group)
-
-            # 2. Подготовим данные для турнирного реранкинга (словари для LLM)
-            lot_groups_data = []
+            
+            # Подготовим данные для турнирного реранкинга
             for group in groups:
                 group_data = []
                 for lot in group:
                     raw_lot = self.raw_lot_repo.get_by_id(lot.raw_lot_id)
                     group_data.append({
-                        'id': lot.id,  # Обязательно передаем реальный ID
+                        'id': lot.id,
                         'title': raw_lot.title if raw_lot else 'N/A',
                         'price': raw_lot.price if raw_lot else 'N/A',
                         'structured_data': lot.structured_data,
-                        'relevance': lot.relevance_note,  # Переименовано для TournamentService
+                        'relevance': lot.relevance_note,
                         'image_description_and_notes': lot.image_description_and_notes
                     })
-                lot_groups_data.append(group_data)
+                all_groups_data.append(group_data)
 
-            # 3. Определяем критерии на основе ключей плоской схемы
-            criteria = "Цена (сравнение стоимости), " + ", ".join(schema.json_schema.keys())
-            criteria += ". Также учитывай соотношение цены и характеристик (выгодность)."
+        # Выполняем все сравнения за один проход
+        all_rankings = tournament_ranking(all_groups_data, criteria, schema.description)  # Передаем все группы сразу
 
-            # 4. Выполняем турнирный реранкинг
-            # Теперь ranked_result — это список словарей в правильном порядке
-            ranked_result_data = tournament_ranking(lot_groups_data, criteria)
+        # Объединяем результаты
+        id_to_lot_map = {lot.id: lot for lot in analyzed_lots}
 
-            # 5. Мапим ID обратно в объекты AnalyzedLot (эффективно через словарь)
-            id_to_lot_map = {lot.id: lot for lot in analyzed_lots}
-            ranked_lots = []
+        # Собираем все рейтинги для каждого лота
+        lot_scores = {}
+        for item in all_rankings:
+            lot_id = int(item['id'])
+            score = float(item.get('tournament_score', 0))
             
-            for item in ranked_result_data:
-                lot_id = int(item['id'])
-                if lot_id in id_to_lot_map:
-                    lot = id_to_lot_map[lot_id]
-                    score = float(item.get('tournament_score', 0))
-                    lot.tournament_score = score
-                    self.analyzed_lot_repo.update_score(lot.id, score)
-                    ranked_lots.append(lot)
+            if lot_id not in lot_scores:
+                lot_scores[lot_id] = []
+            lot_scores[lot_id].append(score)
 
-            # 6. Добавляем лоты, которые могли не попасть в турнир (safety first)
-            ranked_lot_ids = {lot.id for lot in ranked_lots}
-            for lot in analyzed_lots:
-                if lot.id not in ranked_lot_ids:
-                    ranked_lots.append(lot)
+        # Вычисляем усреднённый рейтинг для каждого лота
+        final_scores = {}
+        for lot_id, scores in lot_scores.items():
+            final_scores[lot_id] = sum(scores) / len(scores)  # Среднее арифметическое
 
-            if ranked_lots:
-                top_raw = self.raw_lot_repo.get_by_id(ranked_lots[0].raw_lot_id)
-                top_title = top_raw.title if top_raw else "N/A"
-                logger.info(f"Турнирный реранкинг завершен. Топ-1: {top_title} (ID: {ranked_lots[0].id})")
-            
-            return ranked_lots
+        # Обновляем рейтинги в объектах и базе данных
+        for lot_id, score in final_scores.items():
+            if lot_id in id_to_lot_map:
+                lot = id_to_lot_map[lot_id]
+                lot.tournament_score = score
+                self.analyzed_lot_repo.update_score(lot.id, score)
+
+        # Сортируем лоты по финальному рейтингу
+        ranked_lots = list(analyzed_lots)
+        ranked_lots.sort(key=lambda x: x.tournament_score, reverse=True)
+
+        if ranked_lots:
+            top_raw = self.raw_lot_repo.get_by_id(ranked_lots[0].raw_lot_id)
+            top_title = top_raw.title if top_raw else "N/A"
+            logger.info(f"Турнирный реранкинг завершен. Топ-1: {top_title} (ID: {ranked_lots[0].id}), раундов: {num_rounds}")
+
+        return ranked_lots
     
 
     def _format_deep_search_results(self, analyzed_lots: List[AnalyzedLot], schema: Schema) -> str:
